@@ -24,7 +24,8 @@ github_username:  ihanyong
 
 # Build settings
 markdown: kramdown
-theme: jekyll-theme-architect
+## theme: jekyll-theme-architect
+theme: minima
 gems:
   - jekyll-feed
 exclude:
