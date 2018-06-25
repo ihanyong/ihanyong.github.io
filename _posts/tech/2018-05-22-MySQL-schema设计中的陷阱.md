@@ -2,7 +2,11 @@
 layout: post
 title:  "MySQL 设计中的陷阱"
 date:   2018-05-22 22:30:00 +0800
-categories: tech
+tags:
+        - 读书
+        - 技术
+        - MySQL
+        - 数据库
 ---
 今天提交一个DDL的时候， DBA建议把新增字段设置为 **NOT NULL**，突然意识到数据库的一些最佳实践并没有坚持用起来。 今天刚好做个总结， 稍微盘点一下MySQL设计中的一些实践和陷阱。
 
