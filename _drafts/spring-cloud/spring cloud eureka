@@ -1,0 +1,5 @@
+spring cloud eureka
+
+region   zone
+
+使用 Ribbon 实现服务调用时， 对于 Zone 的设置可以在负载均衡时实现区域亲和特性： Ribbon 的默认策略会优先访问同客户端牌一个 Zone 中的服务端实例，
