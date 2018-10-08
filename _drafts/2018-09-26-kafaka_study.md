@@ -40,30 +40,8 @@ A topic is a category or feed name to which records are published. Topics in kaf
 
 
 
-资源中心需要提供的两个接口
+## 4.5 The Consumer
+The Kafka consumer works by issuing "fetch" requests to the brokers leading the partitions it wants to consume. The consumer specifies its offset in the log with each request and receives back a chunk of log beginning from that position. The consumer thus has significant control over this position and can rewind it to re-consume data if need be.
 
-###  商品库存详情接口
-必传条件
-- 物id (单个)
-
-选传条件
-- 货主/所有权（多选）
-- 仓库（多选）
-- 品质（多选）
-- 区域（多选）
-
-结果分组条件
-- 子物
-- 位置+组合
-
-
-###  扫描接口
-必传条件
-- 库位（组合）
-选传条件
-- 所有权（单选）
-
-结果分组条件
-- 物Id
-
-
+###  Push vs. pull
+An initial question we considered is whether consumers should pull data from brokers or brokers should push data to the consumer. In this respect Kafka follows a more traditional
