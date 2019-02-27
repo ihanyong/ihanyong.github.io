@@ -1,0 +1,72 @@
+@startuml
+
+interface AutoCloseableAsync
+
+interface LeaderContender
+
+interface RpcGateway
+interface FencedRpcGateway
+RpcGateway <|-- FencedRpcGateway
+
+abstract class RpcEndpoint
+AutoCloseableAsync <|.. RpcEndpoint
+RpcGateway <|.. RpcEndpoint
+
+abstract class FencedRpcEndpoint
+RpcEndpoint <|-- FencedRpcEndpoint
+
+interface ResourceManagerGateway
+FencedRpcGateway <|-- ResourceManagerGateway
+
+abstract class ResourceManager
+ResourceManagerGateway <|.. ResourceManager
+LeaderContender <|.. ResourceManager
+FencedRpcEndpoint <|-- ResourceManager
+
+
+
+interface TaskExecutorGateway
+RpcGateway <|-- TaskExecutorGateway
+
+class TaskExecutor
+RpcEndpoint <|-- TaskExecutor
+TaskExecutorGateway <|.. TaskExecutor
+
+interface DispatcherGateway
+FencedRpcGateway <|-- DispatcherGateway
+
+
+abstract class Dispatcher
+FencedRpcEndpoint <|-- Dispatcher
+DispatcherGateway <|.. Dispatcher
+LeaderContender <|.. Dispatcher
+'SubmittedJobGraphStore.SubmittedJobGraphListener <|.. Dispatcher
+
+
+interface JobMasterService
+AutoCloseableAsync <|-- JobMasterService
+
+
+interface CheckpointCoordinatorGateway
+RpcGateway <|-- CheckpointCoordinatorGateway
+
+
+interface JobMasterGateway
+'CheckpointCoordinatorGateway <|-- JobMasterGateway
+FencedRpcGateway <|-- JobMasterGateway
+'KvStateLocationOracle <|-- JobMasterGateway
+'KvStateRegistryGateway <|-- JobMasterGateway
+
+
+class JobMaster
+FencedRpcEndpoint <|-- JobMaster
+JobMasterGateway <|.. JobMaster
+JobMasterService <|.. JobMaster
+
+class JobManagerRunner
+AutoCloseableAsync <|.. JobManagerRunner
+OnCompletionActions <|.. JobManagerRunner
+LeaderContender <|.. JobManagerRunner
+
+
+@enduml

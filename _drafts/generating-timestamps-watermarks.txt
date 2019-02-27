@@ -1,0 +1,57 @@
+generating-timestamps-watermarks
+
+running on event time
+
+TimeCharactoeristic.EventTime
+
+Flink needs to know the event's timestamps ->  each element needs to have its event timestamp assigned. 
+usually done by accessing/extracting the timestamp fromm some field in the element.
+
+tow way to assgin timestamps and generate watermarks
+1. Directly in the dasta stream source  -> SourceFunction
+2. Via a timestapm assigner / watermark generator -> assignTimestampsAndWaterMarkds() on DataStream
+
+## Source Funcitons with Timestamps and Watermarks
+```java
+public class ASourceFunction {
+    @Override
+    public void run(SourceContext<MyType>? ctx) throws Exception {
+        while(/* condition*/) {
+            MyType next = getNext();
+            ctx.collectWithTimestamp(next, next.getEventTimestamp());
+
+            if(next.hasWatermarkTime()) {
+                ctx.emitWatermark(new Watermark(next.getWatermarkTime(0)));
+            }
+        }
+    }
+}
+
+```
+
+## assignTimestampsAndWaterMarkds
+timestamp assigners take a stream and produce a new stream with timestamped elements and watermarkds, if the original stream had timestamps and/or watermarks already, the timestamp assigner overwrites them.
+
+usually immediately after the data source.
+A common pattern, is to parse(MapFunction) and filter (FilterFunction) before the timestamp assigner. 
+In any case, assigner needs to be specified before the first operation on event time (such as the first window operation). 
+
+### Periodic watermarks
+AssignerWithPeriodicWatermarks : 
+assigns timestamps and generates watermarks periodically (possibly depending on the stream elements, or purely based on processing time)
+
+
+
+
+### Punctuated watermarks
+
+
+
+
+
+
+
+
+
+
+
