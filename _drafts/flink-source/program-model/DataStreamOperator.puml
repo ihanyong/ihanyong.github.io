@@ -1,0 +1,20 @@
+@startuml
+(DataStream) as ds
+(KeyedStream) as ks
+(WindowedStream) as ws
+(AllWindowedStream) as aws
+
+
+ds --> ds : map\n flatMap\n filter\n union(*->1)\n window join(2->1)\n window coGroup(2->1)
+
+ds --> ks : keyBy
+ds --> aws : windowAll
+
+ks ..> ds : reduce\n fold\n aggregations\n interval join(2->1)
+ks --> ws : window
+
+ws ..> ds : apply\n reduce\n fold\n reduce\n aggregations
+aws .right.> ds : apply
+
+
+@enduml
