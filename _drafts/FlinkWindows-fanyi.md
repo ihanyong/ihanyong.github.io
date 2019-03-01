@@ -1,42 +1,3 @@
-
-## Windows Lifecycel   容器生命周期
-
-## Keyed vs Non-Keyed Windows  有键与无键窗口
-
-## window Assigners 容器分配器
-### Tumbling Windows 滚动窗口
-### Sliding Windows 滑动窗口
-### Session Windows 会话窗口
-###  Global Windows 全局窗口
-
-
-## Window Functions
-### ReduceFunction
-### AggregateFunction
-### FoldFunction
-### ProcessWindowFunction
-### ProcessWindowFunction with Incremental Aggregation
-### Using per-window state in ProcessWindowFunction
-### WindowFunction (Legacy)
-
-## Triggers
-### Fire and Purge
-### Default Triggers of WindowAssigners
-### Built-in and Custom Triggers
-
-
-## Evictors
-## Allowed Lateness
-### Getting late data as a side output
-### Late elements consideratoins
-## Working with window results
-### Interaction of watermarks and windows
-### Consecutive windowed operations
-## Useful state size considerations
-----------------------------------------------------------
-
-
-
 Windows 是处理无限流的核心概念。 Windows 将流分割成有限大小的 buckets, 以在上面应用计算。 
 
 下面是 Flink windowed 代码的一一般结构（套路）。 第一个是有键有， 第二个是无键的。 唯一的区别是有键的调用方式 为keyBy().window()， 无键的为 windowAll()。
@@ -233,26 +194,122 @@ evictBefore() 用来定义UDF调用前的数据项移除逻辑， evictAfter() �
 
 Flink 预定义的三个 Evictor:
 
-- CountEvictor: 
-- DeltaEvictor: 
-- TimeEvictor: 
+- CountEvictor: 保留前面几个数据项（指定配置的数目）， 忽略后面的数据项。
+- DeltaEvictor: 通过一个DeltaFunction计算窗口中每一个数据项与最后一个数据项的delta， 移除delta值大于等于指定阈值的数据项
+- TimeEvictor: 指一个时间间隔 interval, 找到当前窗口数据项携带的最大的时间 max_time， 移除那些时间小于等于（max_time - interval）的数据项。
 
-    CountEvictor: keeps up to a user-specified number of elements from the window and discards the remaining ones from the beginning of the window buffer.
-    DeltaEvictor: takes a DeltaFunction and a threshold, computes the delta between the last element in the window buffer and each of the remaining ones, and removes the ones with a delta greater or equal to the threshold.
-    TimeEvictor: takes as argument an interval in milliseconds and for a given window, it finds the maximum timestamp max_ts among its elements and removes all the elements with timestamps smaller than max_ts - interval.
 
-Default By default, all the pre-implemented evictors apply their logic before the window function.
+所有内置的 evictor 默认都是在UDF前调用的的， 可以配置为UDF后调用。
 
-Attention Specifying an evictor prevents any pre-aggregation, as all the elements of a window have to be passed to the evictor before applying the computation.
+注意： 指定了Evictor ， Flink就不会为UDF进行预聚合的增量处理了， 所有的窗口数据项会缓存起来直到窗口触发后才进行计算逻辑的处理。
 
-Attention Flink provides no guarantees about the order of the elements within a window. This implies that although an evictor may remove elements from the beginning of the window, these are not necessarily the ones that arrive first or last.
-
+注意： Flink 不保证一个窗口内数据项的顺序。 意味着 Evictor 移除的数据项的顺序是不定的。 如 CountEvictor 保留的不是一定是最早到达窗口的几个数据项。
 
 
 ## Allowed Lateness
-### Getting late data as a side output
-### Late elements consideratoins
-## Working with window results
+
+对于基于 Event-Time 的窗口时， 数据项可能会出现延迟到达： 数据到达时 用于跟踪度量事件时间的watermark已经超过该数据所属窗口的结束时间。
+
+迟于水位（watermark）的到达的数据项默认是直接丢弃的。  Flink 可以为窗口操作指定一个 最大容许延迟，作为数据项不被丢弃的最大延迟时间，默认是 0 。 窗口结束之后，但在容许延迟时间前到达的数据项，依然可以被分配到该窗口。 根据使用的 trigger ，延迟但未被丢弃的数据项可以再次触发窗口的计算。 如 EventTimeTrigger。
+
+为了达到这个目的， Flink会将窗口的状态保存到最大延迟也超时。  之后， Flink会删除窗口及容器的状态数据。
+
+延迟时间默认是0。 也就是说延迟的数据都会被丢弃。
+
+可以这样指定延迟时间：
+
+```
+DataStream<T> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .allowedLateness(<time>)
+    .<windowed transformation>(<window function>);
+```
+
+如果使用的是 GlobalWindows 就没有延迟数据的概念了，因为 GlobalWindows 的结束时间是 Long.MAX_VALUE。
+
+
+### Getting late data as a side output  打到侧输出流处理延迟数据
+Using Flink’s side output feature you can get a stream of the data that was discarded as late.
+通过Flink 的侧输出流的特性， 可以得到到一个被丢弃的延迟数据的流。
+
+
+You first need to specify that you want to get late data using sideOutputLateData(OutputTag) on the windowed stream. Then, you can get the side-output stream on the result of the windowed operation:
+
+首先通过 sideOutputLateData(OutputTag) 方法 在 windowStream 定义一个延迟数据的侧输出流。 然后， 可以在 窗口结果上取得这个侧输出流：
+
+```
+
+final OutputTag<T> lateOutputTag = new OutputTag<T>("late-data"){};
+
+DataStream<T> input = ...;
+
+SingleOutputStreamOperator<T> result = input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .allowedLateness(<time>)
+    .sideOutputLateData(lateOutputTag)
+    .<windowed transformation>(<window function>);
+
+DataStream<T> lateStream = result.getSideOutput(lateOutputTag);
+
+```
+
+### Late elements consideratoins 关于延迟数据的思考
+
+若指定了延迟时间， 窗口结束时间后， 窗口及窗口内容数据会保留到容许的延迟时间。 这时， 一个延迟但不应被丢弃的数据项到达时， 会再次触发窗口的计算逻辑，叫做延迟触发（第一次触发叫 主触发）。 对于 session 窗口来说， 延迟数据可能会引起已有窗口的合并（延迟数据的时间刚好连接了两个session）。
+
+应该注意的是， 延迟触发的计算结果应该被视为前一次触发计算结果的更新。 也就是说对于一个计算，产生多次的结果。 程序中要注意这个重复结果的处理。
+
+
+## Working with window results  使用窗口的结果数据
+
+窗口操作的结果是一个 DataStream， 结果数据中没有窗口相关的信息。 如果想要保留窗口相关信息，需要自己在 ProcessWindowFunction 中手机设置到结果数据项中。 设置到结果数据项上唯一有用的信息就是窗口的时间了。 结果数据的时间(timestamp) 设置为最大容许时间（window.end_time -1, end_time 是不包含在窗口中的）。 event-Time 和 Processing-Time 是一样的。  
+
+对于processing-time窗口，这没有特别的含义，但对于 event-time 窗口，加上水印与窗口交互，可以实现具有相同窗口大小的连续窗口操作。
+
+下面会详细讨论到。
+
 ### Interaction of watermarks and windows
-### Consecutive windowed operations
+
+Before continuing in this section you might want to take a look at our section about event time and watermarks.
+
+看下去前最好对 [事件时间与水位](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/event_time.html)有个了解.
+
+当水位到达窗口操作时会触发两个事情： 
+- 触发所有结束时间-1 小于最新水位的窗口的计算处理
+- 水位发送到下游操作
+
+
+### Consecutive windowed operations 连续的窗口操作
+
+As mentioned before, the way the timestamp of windowed results is computed and how watermarks interact with windows allows stringing together consecutive windowed operations. This can be useful when you want to do two consecutive windowed operations where you want to use different keys but still want elements from the same upstream window to end up in the same downstream window. Consider this example:
+
+
+
+如前所述，窗口结果的时间戳的计算方式和水位与窗口的交互方式允许将连续的窗口操作串接起来。当想要执行两个连续的窗口化操作，且需要使用不同的键，而且想要下游窗口处理上游窗口的数据，则这一点非常有用。考虑这个例子： 
+
+```
+DataStream<Integer> input = ...;
+
+DataStream<Integer> resultsPerKey = input
+    .keyBy(<key selector>)
+    .window(TumblingEventTimeWindows.of(Time.seconds(5)))
+    .reduce(new Summer());
+
+DataStream<Integer> globalResults = resultsPerKey
+    .windowAll(TumblingEventTimeWindows.of(Time.seconds(5)))
+    .process(new TopKWindowFunction());
+```
+在这个例子中， 第一个操作的时间窗口[0, 5)的结果会落到第二个操作时间窗口[0, 5)中。 第一个操计算[0, 5)中每个key 的总和， 第二个操作取得[0, 5)中总和数前几名（topk)的key。
+
+
 ## Useful state size considerations
+
+可以定义非常长的时间窗口（几天、几周、几个月）， 但会积累出体量非常大的状态。 估算窗口操作的存储需要时，有几个原则需要记住：
+
+- Flink 会为每个窗口的每个数据项做一个拷贝。 这样， 在滚动窗口中，每个数据项只一个拷贝（一个数据项属于且只属于一个窗口，除非数据被丢弃）。 面在滑动窗口中， 每个数据项可能会有多个拷贝（一个数据项可能属于多个窗口）。因此，一个长度为一天，滑动间隔为一秒的滑动窗口绝逼不是一个好主意。 
+- ReduceFunction, AggregateFunction, 和 FoldFunction 可以极大的减少存储需求，因为他们可以在数据到达时增量的计算合并数据项，一个窗口只需要保存一份值。 而 ProcessWindowFunction 则需要堆积所有的数据项。
+- 使用 Evictor 的话，会阻止所有的增量处理， 因为在应用计算逻辑前，所有的数据项需要通过 evictor 来决定是参与计算。
