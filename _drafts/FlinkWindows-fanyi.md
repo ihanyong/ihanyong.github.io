@@ -264,7 +264,6 @@ input
 
 ### FoldFunction
 
-A FoldFunction specifies how an input element of the window is combined with an element of the output type. The FoldFunction is incrementally called for each element that is added to the window and the current output value. The first element is combined with a pre-defined initial value of the output type.
 
 FoldFunction 定义如何把一个窗口的输入项合并到一个输入项上（与输入类型可心不一样）。 每一个数据项被分配到窗口时，FoldFunction 会被增量地调用，并把结果增量地合并到输出值上。窗口的第一个数据项会被合并到输出项的初始值上。
 
@@ -425,18 +424,16 @@ The following example shows how an incremental FoldFunction can be combined with
 - 一个键值对应的一个窗口定义的一个实例： 可以是 userid为xyz的 [12:00 - 13:00 ) 时间窗口。 基于窗口的定义，根据作业当前正在处理的键的数量以及事件落入的时间段，将有许多窗口实例。
 
 
-Per-window state is tied to the latter of those two. Meaning that if we process events for 1000 different keys and events for all of them currently fall into the [12:00, 13:00) time window then there will be 1000 window instances that each have their own keyed per-window state.
+每窗口状态与后一个“窗口”相关联。也就是说，如果我们处理1000个不同键的事件，并且当前所有键的事件都属于[12:00，13:00)时间窗口，那么将有1000个窗口实例，每个窗口实例都有自己的键状态。
 
-There are two methods on the Context object that a process() invocation receives that allow access two the two types of state:
+调用process()时， 得到的上下文对象有两个方法来访问两种状态:
 
-    globalState(), which allows access to keyed state that is not scoped to a window
-    windowState(), which allows access to keyed state that is also scoped to the window
+- globalState(), 用来访问非窗口实例生命周期范围的键状态
+- windowState(), 用来访问窗口实例生命周期范围的键状态
 
-This feature is helpful if you anticipate multiple firing for the same window, as can happen when you have late firings for data that arrives late or when you have a custom trigger that does speculative early firings. In such a case you would store information about previous firings or the number of firings in per-window state.
+如果同一窗口实例会发生多次触发，则这个功能是非常有用。比如因为延时数据而发生延时触发，或者自定义的触发器会做一些预触发。这种情况下，可以将之前的触发信息或触发次数存储在窗口键状态中。
 
-When using windowed state it is important to also clean up that state when a window is cleared. This should happen in the clear() method.
-
-
+使用窗口状态时，清除窗口时也要清除该状态（重要），应该在clear（）方法中处理。 
 
 ### WindowFunction (Legacy)
 
