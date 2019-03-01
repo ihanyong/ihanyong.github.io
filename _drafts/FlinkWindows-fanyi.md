@@ -50,8 +50,33 @@ stream
 
 ### Tumbling Windows 滚动窗口
 滚动窗口将每一个元素分配到一个特定时间的窗口中。 滚动窗口时间固定且窗口间没有重叠。 
+如下图所示， 可以指定一个大小为5分钟的滚动窗口，每5分钟新建一个窗口：
 
-... todo
+![滚动窗口](https://ci.apache.org/projects/flink/flink-docs-release-1.7/fig/tumbling-windows.svg)
+
+代码示例：
+```
+
+DataStream<T> input = ...;
+
+// tumbling event-time windows
+input
+    .keyBy(<key selector>)
+    .window(TumblingEventTimeWindows.of(Time.seconds(5)))
+    .<windowed transformation>(<window function>);
+
+// tumbling processing-time windows
+input
+    .keyBy(<key selector>)
+    .window(TumblingProcessingTimeWindows.of(Time.seconds(5)))
+    .<windowed transformation>(<window function>);
+
+// daily tumbling event-time windows offset by -8 hours.
+input
+    .keyBy(<key selector>)
+    .window(TumblingEventTimeWindows.of(Time.days(1), Time.hours(-8)))
+    .<windowed transformation>(<window function>);
+```
 
 时间段可以用 Time.milliseconds(x), Time.seconds(x), Time.minutes(x) 等来指定。
 
@@ -62,8 +87,36 @@ stream
 ### Sliding Windows 滑动窗口
 滑动容器将元素分配到一组固定长度的窗口。 类似于滚动窗口， 滑动窗口的大小也是通过 window size 参数来配置。 有一个 window slide 参数用来控制滑动的创建频度。 因此如果 slide 小于 size， 滑动窗口间是可以有重叠的， 这时一个元素可能被分配到多个窗口中。
 
+如下图所示， 指定了一个长度为10分钟，滑动步长5分钟的滑动窗口，每5分钟新建一个长度为10分钟的时间窗口：
 
-... todo
+![滑动窗口](https://ci.apache.org/projects/flink/flink-docs-release-1.7/fig/sliding-windows.svg)
+
+代码示例
+
+```
+
+DataStream<T> input = ...;
+
+// sliding event-time windows
+input
+    .keyBy(<key selector>)
+    .window(SlidingEventTimeWindows.of(Time.seconds(10), Time.seconds(5)))
+    .<windowed transformation>(<window function>);
+
+// sliding processing-time windows
+input
+    .keyBy(<key selector>)
+    .window(SlidingProcessingTimeWindows.of(Time.seconds(10), Time.seconds(5)))
+    .<windowed transformation>(<window function>);
+
+// sliding processing-time windows offset by -8 hours
+input
+    .keyBy(<key selector>)
+    .window(SlidingProcessingTimeWindows.of(Time.hours(12), Time.hours(1), Time.hours(-8)))
+    .<windowed transformation>(<window function>);
+
+
+```
 
 与滚动窗口一样， 滑动窗口也可以指定 offset 参数， 功能一样。
 
@@ -72,7 +125,42 @@ stream
 
 会话窗口根据数据的连续性（会话活跃性）将数据项进行分组。 会话窗口没有重叠且也没有开始结束时间。 如果一段时间里没有接收到任何数据的话就结束一个窗口。 会话窗口的的时间间隔可以静态配置或者通过 extractor function 动态指定。 超过指定的间隔时间后，当前的窗口关闭，后续到达的数据项会被分配给一个新的会话窗口。
 
-... todo
+![会话窗口](https://ci.apache.org/projects/flink/flink-docs-release-1.7/fig/session-windows.svg)
+
+代码示例
+```
+DataStream<T> input = ...;
+
+// event-time session windows with static gap
+input
+    .keyBy(<key selector>)
+    .window(EventTimeSessionWindows.withGap(Time.minutes(10)))
+    .<windowed transformation>(<window function>);
+    
+// event-time session windows with dynamic gap
+input
+    .keyBy(<key selector>)
+    .window(EventTimeSessionWindows.withDynamicGap((element) -> {
+        // determine and return session gap
+    }))
+    .<windowed transformation>(<window function>);
+
+// processing-time session windows with static gap
+input
+    .keyBy(<key selector>)
+    .window(ProcessingTimeSessionWindows.withGap(Time.minutes(10)))
+    .<windowed transformation>(<window function>);
+    
+// processing-time session windows with dynamic gap
+input
+    .keyBy(<key selector>)
+    .window(ProcessingTimeSessionWindows.withDynamicGap((element) -> {
+        // determine and return session gap
+    }))
+    .<windowed transformation>(<window function>)
+```
+
+
 
 可以通过 SessionWindowTimeGapExtractor 接口来实现动态间隔
 
@@ -82,7 +170,19 @@ stream
 ###  Global Windows 全局窗口
 全局窗口将键值相同的元素全部分配到一个窗口中。 全局窗口一般用在你需要自定义trigger 的时候， 否则的话，由于全局窗口没有结束时间， 我们的计算逻辑不会触发执行。
 
+![全局窗口](https://ci.apache.org/projects/flink/flink-docs-release-1.7/fig/non-windowed.svg)
 
+代码示例
+```
+
+DataStream<T> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(GlobalWindows.create())
+    .<windowed transformation>(<window function>);
+
+```
 
 ## Window Functions
 
@@ -96,7 +196,20 @@ ProcessWindowFunction 是在调用前缓存窗口所有的数据项，窗口结�
 ### ReduceFunction
 定义如何将两个数据项归并为一个类型相同的结果。 数据项分配到窗口时会增量地处理。
 
-... todo
+代码示例
+```
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .reduce(new ReduceFunction<Tuple2<String, Long>> {
+      public Tuple2<String, Long> reduce(Tuple2<String, Long> v1, Tuple2<String, Long> v2) {
+        return new Tuple2<>(v1.f0, v1.f1 + v2.f1);
+      }
+    });
+
+```
 
 ### AggregateFunction
 AggregateFunction 就一个更泛化的 ReduceFunction。 需要指定三个类型， 输入类型（IN）， 累加器类型(ACC)和输出类型(OUT)。  AggregateFunction 有相应的方法用来 
@@ -107,14 +220,55 @@ AggregateFunction 就一个更泛化的 ReduceFunction。 需要指定三个类�
 
 与ReduceFunction一样， 数据项分配到窗口时会增量地处理。
 
-... todo 
+代码示例
+```
+/**
+ * The accumulator is used to keep a running sum and a count. The {@code getResult} method
+ * computes the average.
+ */
+private static class AverageAggregate
+    implements AggregateFunction<Tuple2<String, Long>, Tuple2<Long, Long>, Double> {
+  @Override
+  public Tuple2<Long, Long> createAccumulator() {
+    return new Tuple2<>(0L, 0L);
+  }
+
+  @Override
+  public Tuple2<Long, Long> add(Tuple2<String, Long> value, Tuple2<Long, Long> accumulator) {
+    return new Tuple2<>(accumulator.f0 + value.f1, accumulator.f1 + 1L);
+  }
+
+  @Override
+  public Double getResult(Tuple2<Long, Long> accumulator) {
+    return ((double) accumulator.f0) / accumulator.f1;
+  }
+
+  @Override
+  public Tuple2<Long, Long> merge(Tuple2<Long, Long> a, Tuple2<Long, Long> b) {
+    return new Tuple2<>(a.f0 + b.f0, a.f1 + b.f1);
+  }
+}
+
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .aggregate(new AverageAggregate());
+
+```
 
 
 ### FoldFunction
+[todo]
 ### ProcessWindowFunction
+[todo]
 ### ProcessWindowFunction with Incremental Aggregation
+[todo]
 ### Using per-window state in ProcessWindowFunction
+[todo]
 ### WindowFunction (Legacy)
+[todo]
 
 ## Triggers
 触发器决定一个窗口什么时候可以被窗口function 处理。 每个 WindowAssigner 都有一个默认的触发器(Trigger)。 如果默认的触发器不满足需求， 可以通过 trigger(...) 方法指定一个自定义的触发器。
