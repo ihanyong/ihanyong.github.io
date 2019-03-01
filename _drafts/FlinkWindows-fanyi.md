@@ -3,6 +3,7 @@ Windows 是处理无限流的核心概念。 Windows 将流分割成有限大小
 下面是 Flink windowed 代码的一一般结构（套路）。 第一个是有键有， 第二个是无键的。 唯一的区别是有键的调用方式 为keyBy().window()， 无键的为 windowAll()。
 
 ####  Keyed Windows
+```
 stream
        .keyBy(...)               <-  变成带键的流
        .window(...)              <-  必须： 窗口分配器 （assigner）
@@ -12,8 +13,10 @@ stream
       [.sideOutputLateData(...)] <-  可选：延时数据分支流标签 (默认没有延时数据分支流)
        .reduce/aggregate/fold/apply()      <-  必须: 用户自定义函数（UDF）
       [.getSideOutput(...)]      <-  可选: 获取分支流
+```
 
 #### Non-Keyed Windows
+```
 stream
        .windowAll(...)           <-  必须： 窗口分配器 （assigner）
       [.trigger(...)]            <-  可选： 触发器 （assigner 有一个默认的）
@@ -22,7 +25,7 @@ stream
       [.sideOutputLateData(...)] <-  可选：延时数据分支流标签 (默认没有延时数据分支流)
        .reduce/aggregate/fold/apply()      <-  必须: 用户自定义函数（UDF）
       [.getSideOutput(...)]      <-  可选: 获取分支流
-
+```
 
 
 ## Windows Lifecycel   窗口生命周期
@@ -260,15 +263,215 @@ input
 
 
 ### FoldFunction
-[todo]
+
+A FoldFunction specifies how an input element of the window is combined with an element of the output type. The FoldFunction is incrementally called for each element that is added to the window and the current output value. The first element is combined with a pre-defined initial value of the output type.
+
+FoldFunction 定义如何把一个窗口的输入项合并到一个输入项上（与输入类型可心不一样）。 每一个数据项被分配到窗口时，FoldFunction 会被增量地调用，并把结果增量地合并到输出值上。窗口的第一个数据项会被合并到输出项的初始值上。
+
+FoldFunction 可以这样用:
+
+```
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .fold("", new FoldFunction<Tuple2<String, Long>, String>> {
+       public String fold(String acc, Tuple2<String, Long> value) {
+         return acc + value.f1;
+       }
+    });
+```
+
+上面的例子将所有的 Long 类型的输入值都追加到一个初始为空的字符串。
+
+注意： fold() 不能用于 session 窗口其它可合并的窗口。
+
+
 ### ProcessWindowFunction
+A ProcessWindowFunction gets an Iterable containing all the elements of the window, and a Context object with access to time and state information, which enables it to provide more flexibility than other window functions. This comes at the cost of performance and resource consumption, because elements cannot be incrementally aggregated but instead need to be buffered internally until the window is considered ready for processing.
+
+ProcessWindowFunction 长这样:
+```
+public abstract class ProcessWindowFunction<IN, OUT, KEY, W extends Window> implements Function {
+
+    /**
+     * Evaluates the window and outputs none or several elements.
+     *
+     * @param key The key for which this window is evaluated.
+     * @param context The context in which the window is being evaluated.
+     * @param elements The elements in the window being evaluated.
+     * @param out A collector for emitting elements.
+     *
+     * @throws Exception The function may throw exceptions to fail the program and trigger recovery.
+     */
+    public abstract void process(
+            KEY key,
+            Context context,
+            Iterable<IN> elements,
+            Collector<OUT> out) throws Exception;
+
+      /**
+       * The context holding window metadata.
+       */
+      public abstract class Context implements java.io.Serializable {
+          /**
+           * Returns the window that is being evaluated.
+           */
+          public abstract W window();
+
+          /** Returns the current processing time. */
+          public abstract long currentProcessingTime();
+
+          /** Returns the current event-time watermark. */
+          public abstract long currentWatermark();
+
+          /**
+           * State accessor for per-key and per-window state.
+           *
+           * <p><b>NOTE:</b>If you use per-window state you have to ensure that you clean it up
+           * by implementing {@link ProcessWindowFunction#clear(Context)}.
+           */
+          public abstract KeyedStateStore windowState();
+
+          /**
+           * State accessor for per-key global state.
+           */
+          public abstract KeyedStateStore globalState();
+      }
+
+}
+
+```
+
+
+Note The key parameter is the key that is extracted via the KeySelector that was specified for the keyBy() invocation. In case of tuple-index keys or string-field references this key type is always Tuple and you have to manually cast it to a tuple of the correct size to extract the key fields.
+
+
+ProcessWindowFunction 的用法:
+```
+
+
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+  .keyBy(t -> t.f0)
+  .timeWindow(Time.minutes(5))
+  .process(new MyProcessWindowFunction());
+
+/* ... */
+
+public class MyProcessWindowFunction 
+    extends ProcessWindowFunction<Tuple2<String, Long>, String, String, TimeWindow> {
+
+  @Override
+  public void process(String key, Context context, Iterable<Tuple2<String, Long>> input, Collector<String> out) {
+    long count = 0;
+    for (Tuple2<String, Long> in: input) {
+      count++;
+    }
+    out.collect("Window: " + context.window() + "count: " + count);
+  }
+}
+
+
+```
+
+The example shows a ProcessWindowFunction that counts the elements in a window. In addition, the window function adds information about the window to the output.
+
+Attention Note that using ProcessWindowFunction for simple aggregates such as count is quite inefficient. The next section shows how a ReduceFunction or AggregateFunction can be combined with a ProcessWindowFunction to get both incremental aggregation and the added information of a ProcessWindowFunction.
+
 [todo]
+
 ### ProcessWindowFunction with Incremental Aggregation
+
+A ProcessWindowFunction can be combined with either a ReduceFunction, an AggregateFunction, or a FoldFunction to incrementally aggregate elements as they arrive in the window. When the window is closed, the ProcessWindowFunction will be provided with the aggregated result. This allows it to incrementally compute windows while having access to the additional window meta information of the ProcessWindowFunction.
+
+Note You can also the legacy WindowFunction instead of ProcessWindowFunction for incremental window aggregation.
+
+##### Incremental Window Aggregation with ReduceFunction
+
+The following example shows how an incremental ReduceFunction can be combined with a ProcessWindowFunction to return the smallest event in a window along with the start time of the window.
+
+```
+```
+
+
+##### Incremental Window Aggregation with AggregateFunction
+
+The following example shows how an incremental AggregateFunction can be combined with a ProcessWindowFunction to compute the average and also emit the key and window along with the average.
+
+```
+```
+
+
+#### Incremental Window Aggregation with FoldFunction
+
+The following example shows how an incremental FoldFunction can be combined with a ProcessWindowFunction to extract the number of events in the window and return also the key and end time of the window.
+
+```
+```
+
+
+
+
 [todo]
 ### Using per-window state in ProcessWindowFunction
-[todo]
+
+除了访问键状态（和其它rich function 一样）， ProcessWindowFunction 还可以使用当前窗口范围的键状态。 搞清楚 per-window state关联的窗口指的是什么非常重要。
+窗口可能有不同的意思:
+
+- 通过 windowed 算子指定的的窗口定义： 可以是1小时的滚动窗口， 也可以是一个长度为2 小时，滑动步长为1小时的滑动窗口
+- 一个键值对应的一个窗口定义的一个实例： 可以是 userid为xyz的 [12:00 - 13:00 ) 时间窗口。 基于窗口的定义，根据作业当前正在处理的键的数量以及事件落入的时间段，将有许多窗口实例。
+
+
+Per-window state is tied to the latter of those two. Meaning that if we process events for 1000 different keys and events for all of them currently fall into the [12:00, 13:00) time window then there will be 1000 window instances that each have their own keyed per-window state.
+
+There are two methods on the Context object that a process() invocation receives that allow access two the two types of state:
+
+    globalState(), which allows access to keyed state that is not scoped to a window
+    windowState(), which allows access to keyed state that is also scoped to the window
+
+This feature is helpful if you anticipate multiple firing for the same window, as can happen when you have late firings for data that arrives late or when you have a custom trigger that does speculative early firings. In such a case you would store information about previous firings or the number of firings in per-window state.
+
+When using windowed state it is important to also clean up that state when a window is cleared. This should happen in the clear() method.
+
+
+
 ### WindowFunction (Legacy)
-[todo]
+
+在一些使用 ProcessWindowFunction 的地方也可以使用 WindowFunction。 WindowFunction 是一个老版本的 ProcessWindowFunction， 提供的上下文内容相对较少， 少了一些高级功能，如 per-window keyed state。 这个接口将来会废弃掉。
+
+WindowFunction 长这样:
+
+```
+public interface WindowFunction<IN, OUT, KEY, W extends Window> extends Function, Serializable {
+
+  /**
+   * Evaluates the window and outputs none or several elements.
+   *
+   * @param key The key for which this window is evaluated.
+   * @param window The window that is being evaluated.
+   * @param input The elements in the window being evaluated.
+   * @param out A collector for emitting elements.
+   *
+   * @throws Exception The function may throw exceptions to fail the program and trigger recovery.
+   */
+  void apply(KEY key, W window, Iterable<IN> input, Collector<OUT> out) throws Exception;
+}
+
+```
+
+WindowFunction 可以这样用:
+```
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+    .keyBy(<key selector>)
+    .window(<window assigner>)
+    .apply(new MyWindowFunction());
+```
+
 
 ## Triggers
 触发器决定一个窗口什么时候可以被窗口function 处理。 每个 WindowAssigner 都有一个默认的触发器(Trigger)。 如果默认的触发器不满足需求， 可以通过 trigger(...) 方法指定一个自定义的触发器。
@@ -462,8 +665,8 @@ DataStream<Integer> globalResults = resultsPerKey
 
 ## Useful state size considerations
 
-可以定义非常长的时间窗口（几天、几周、几个月）， 但会积累出体量非常大的状态。 估算窗口操作的存储需要时，有几个原则需要记住：
+可以定义非常长的时间窗口（几天、几周、几个月）， 但也会积累出体量非常大的状态数据。 估算窗口操作的存储需要时，有几个原则需要记住：
 
-- Flink 会为每个窗口的每个数据项做一个拷贝。 这样， 在滚动窗口中，每个数据项只一个拷贝（一个数据项属于且只属于一个窗口，除非数据被丢弃）。 面在滑动窗口中， 每个数据项可能会有多个拷贝（一个数据项可能属于多个窗口）。因此，一个长度为一天，滑动间隔为一秒的滑动窗口绝逼不是一个好主意。 
-- ReduceFunction, AggregateFunction, 和 FoldFunction 可以极大的减少存储需求，因为他们可以在数据到达时增量的计算合并数据项，一个窗口只需要保存一份值。 而 ProcessWindowFunction 则需要堆积所有的数据项。
+- Flink 会为每个窗口的每个数据项生成一份拷贝。 在滚动窗口中，每个数据项只有一份拷贝（一个数据项属于且只属于一个窗口，除非数据被丢弃）。 而在滑动窗口中， 每个数据项可能会有多个拷贝（一个数据项可能属于多个窗口）。所以，一个长度为一天，滑动间隔为一秒的滑动窗口绝逼不是一个好主意。 
+- ReduceFunction, AggregateFunction, 和 FoldFunction 可以极大的减少存储需求，因为他们可以在数据到达时增量地计算合并数据项，一个窗口只需要保存一份数据值。 而 ProcessWindowFunction 则需要堆积所有的数据项。
 - 使用 Evictor 的话，会阻止所有的增量处理， 因为在应用计算逻辑前，所有的数据项需要通过 evictor 来决定是参与计算。
