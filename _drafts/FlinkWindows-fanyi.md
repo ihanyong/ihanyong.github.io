@@ -288,7 +288,10 @@ input
 
 
 ### ProcessWindowFunction
-A ProcessWindowFunction gets an Iterable containing all the elements of the window, and a Context object with access to time and state information, which enables it to provide more flexibility than other window functions. This comes at the cost of performance and resource consumption, because elements cannot be incrementally aggregated but instead need to be buffered internally until the window is considered ready for processing.
+
+ProcessWindowFunction  可以获取到一个包含了所有数据项的 Tterable对象， 和一个包含了一个时间与状态信息的上下文对象。 由于数据项不能在分配到窗口时增量地计算处理，而是缓存起来走到窗口计算被触发，这会带来性能损失与资源的浪费。
+
+
 
 ProcessWindowFunction 长这样:
 ```
@@ -343,13 +346,10 @@ public abstract class ProcessWindowFunction<IN, OUT, KEY, W extends Window> impl
 
 ```
 
-
-Note The key parameter is the key that is extracted via the KeySelector that was specified for the keyBy() invocation. In case of tuple-index keys or string-field references this key type is always Tuple and you have to manually cast it to a tuple of the correct size to extract the key fields.
-
+注意： 参数 key 是通过 keyBy()算子指定的 KeySelector 获得的。 如果是通过 tuple-index 或者 字段名来指定的key, 参数 key 的类型是一个Tuple， 需要自己手动将 Tuple  类型转换为对应的 TupleN, 来拿到 key的值。
 
 ProcessWindowFunction 的用法:
 ```
-
 
 DataStream<Tuple2<String, Long>> input = ...;
 
@@ -376,31 +376,113 @@ public class MyProcessWindowFunction
 
 ```
 
-The example shows a ProcessWindowFunction that counts the elements in a window. In addition, the window function adds information about the window to the output.
+这个例子演示了如何统计窗口中的数据项数目，并且为输出结果添加了窗口的一些信息。
 
-Attention Note that using ProcessWindowFunction for simple aggregates such as count is quite inefficient. The next section shows how a ReduceFunction or AggregateFunction can be combined with a ProcessWindowFunction to get both incremental aggregation and the added information of a ProcessWindowFunction.
+注意： 使用 ProcessWindowFunction 来实现一些简单的聚合功能如计数是非常低效的。下一节将会演示 如何 将ReduceFunction 或 AggregateFunction 与 ProcessWindowFunction 结合在一起来实现双赢 -- 既然增量地处理数据，也能获取到 ProcessWindowFunction 提供的额外信息。
 
-[todo]
+
 
 ### ProcessWindowFunction with Incremental Aggregation
 
-A ProcessWindowFunction can be combined with either a ReduceFunction, an AggregateFunction, or a FoldFunction to incrementally aggregate elements as they arrive in the window. When the window is closed, the ProcessWindowFunction will be provided with the aggregated result. This allows it to incrementally compute windows while having access to the additional window meta information of the ProcessWindowFunction.
+ProcessWindowFunction 可以通过与 ReduceFunction、AggregateFunction、 FoldFunction结合使用的方式实现在数据到达就即时处理的功能。 将窗口结束时，ProcessWindowFunction 会得到一个聚合好的结果。 这样就可以既能在数据项到达时即时增量处理数据，也能获取到 ProcessWindowFunction 提供的窗口元数据。
 
-Note You can also the legacy WindowFunction instead of ProcessWindowFunction for incremental window aggregation.
+
+
+注意： 你依然可以使用原来的WindowFunction来实现增量处理。
 
 ##### Incremental Window Aggregation with ReduceFunction
 
-The following example shows how an incremental ReduceFunction can be combined with a ProcessWindowFunction to return the smallest event in a window along with the start time of the window.
+
+
+下面的例子演示使用 ProcessWindowFunction+ReduceFunction 实现计算窗口最小值。
 
 ```
+DataStream<SensorReading> input = ...;
+
+input
+  .keyBy(<key selector>)
+  .timeWindow(<duration>)
+  .reduce(new MyReduceFunction(), new MyProcessWindowFunction());
+
+// Function definitions
+
+private static class MyReduceFunction implements ReduceFunction<SensorReading> {
+
+  public SensorReading reduce(SensorReading r1, SensorReading r2) {
+      return r1.value() > r2.value() ? r2 : r1;
+  }
+}
+
+private static class MyProcessWindowFunction
+    extends ProcessWindowFunction<SensorReading, Tuple2<Long, SensorReading>, String, TimeWindow> {
+
+  public void process(String key,
+                    Context context,
+                    Iterable<SensorReading> minReadings,
+                    Collector<Tuple2<Long, SensorReading>> out) {
+      SensorReading min = minReadings.iterator().next();
+      out.collect(new Tuple2<Long, SensorReading>(window.getStart(), min));
+  }
+}
 ```
 
 
 ##### Incremental Window Aggregation with AggregateFunction
 
-The following example shows how an incremental AggregateFunction can be combined with a ProcessWindowFunction to compute the average and also emit the key and window along with the average.
+
+下面的例子演示使用 ProcessWindowFunction+AggregateFuncton 计算窗口平均值，并在发送的结果中包含了窗口所属的key。
+
 
 ```
+DataStream<Tuple2<String, Long>> input = ...;
+
+input
+  .keyBy(<key selector>)
+  .timeWindow(<duration>)
+  .aggregate(new AverageAggregate(), new MyProcessWindowFunction());
+
+// Function definitions
+
+/**
+ * The accumulator is used to keep a running sum and a count. The {@code getResult} method
+ * computes the average.
+ */
+private static class AverageAggregate
+    implements AggregateFunction<Tuple2<String, Long>, Tuple2<Long, Long>, Double> {
+  @Override
+  public Tuple2<Long, Long> createAccumulator() {
+    return new Tuple2<>(0L, 0L);
+  }
+
+  @Override
+  public Tuple2<Long, Long> add(Tuple2<String, Long> value, Tuple2<Long, Long> accumulator) {
+    return new Tuple2<>(accumulator.f0 + value.f1, accumulator.f1 + 1L);
+  }
+
+  @Override
+  public Double getResult(Tuple2<Long, Long> accumulator) {
+    return ((double) accumulator.f0) / accumulator.f1;
+  }
+
+  @Override
+  public Tuple2<Long, Long> merge(Tuple2<Long, Long> a, Tuple2<Long, Long> b) {
+    return new Tuple2<>(a.f0 + b.f0, a.f1 + b.f1);
+  }
+}
+
+private static class MyProcessWindowFunction
+    extends ProcessWindowFunction<Double, Tuple2<String, Double>, String, TimeWindow> {
+
+  public void process(String key,
+                    Context context,
+                    Iterable<Double> averages,
+                    Collector<Tuple2<String, Double>> out) {
+      Double average = averages.iterator().next();
+      out.collect(new Tuple2<>(key, average));
+  }
+}
+
+
 ```
 
 
@@ -408,13 +490,44 @@ The following example shows how an incremental AggregateFunction can be combined
 
 The following example shows how an incremental FoldFunction can be combined with a ProcessWindowFunction to extract the number of events in the window and return also the key and end time of the window.
 
+
+下面的例子演示使用 ProcessWindowFunction+FoldFunction 计算窗口数据项计数，并在发送的结果中包含了窗口所属的key和窗口的结束时间。
+
 ```
+DataStream<SensorReading> input = ...;
+
+input
+  .keyBy(<key selector>)
+  .timeWindow(<duration>)
+  .fold(new Tuple3<String, Long, Integer>("",0L, 0), new MyFoldFunction(), new MyProcessWindowFunction())
+
+// Function definitions
+
+private static class MyFoldFunction
+    implements FoldFunction<SensorReading, Tuple3<String, Long, Integer> > {
+
+  public Tuple3<String, Long, Integer> fold(Tuple3<String, Long, Integer> acc, SensorReading s) {
+      Integer cur = acc.getField(2);
+      acc.setField(cur + 1, 2);
+      return acc;
+  }
+}
+
+private static class MyProcessWindowFunction
+    extends ProcessWindowFunction<Tuple3<String, Long, Integer>, Tuple3<String, Long, Integer>, String, TimeWindow> {
+
+  public void process(String key,
+                    Context context,
+                    Iterable<Tuple3<String, Long, Integer>> counts,
+                    Collector<Tuple3<String, Long, Integer>> out) {
+    Integer count = counts.iterator().next().getField(2);
+    out.collect(new Tuple3<String, Long, Integer>(key, context.window().getEnd(),count));
+  }
+}
+
 ```
 
 
-
-
-[todo]
 ### Using per-window state in ProcessWindowFunction
 
 除了访问键状态（和其它rich function 一样）， ProcessWindowFunction 还可以使用当前窗口范围的键状态。 搞清楚 per-window state关联的窗口指的是什么非常重要。
@@ -628,8 +741,6 @@ DataStream<T> lateStream = result.getSideOutput(lateOutputTag);
 
 ### Interaction of watermarks and windows
 
-Before continuing in this section you might want to take a look at our section about event time and watermarks.
-
 看下去前最好对 [事件时间与水位](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/event_time.html)有个了解.
 
 当水位到达窗口操作时会触发两个事情： 
@@ -638,10 +749,6 @@ Before continuing in this section you might want to take a look at our section a
 
 
 ### Consecutive windowed operations 连续的窗口操作
-
-As mentioned before, the way the timestamp of windowed results is computed and how watermarks interact with windows allows stringing together consecutive windowed operations. This can be useful when you want to do two consecutive windowed operations where you want to use different keys but still want elements from the same upstream window to end up in the same downstream window. Consider this example:
-
-
 
 如前所述，窗口结果的时间戳的计算方式和水位与窗口的交互方式允许将连续的窗口操作串接起来。当想要执行两个连续的窗口化操作，且需要使用不同的键，而且想要下游窗口处理上游窗口的数据，则这一点非常有用。考虑这个例子： 
 
