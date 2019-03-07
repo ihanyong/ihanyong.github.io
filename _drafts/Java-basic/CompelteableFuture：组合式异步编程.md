@@ -63,6 +63,74 @@ CompletableFuture 利用Java8的新特性以更直观的方式 将上述需要�
 下面构建一个“最佳价格查询器”来展示CompletableFuture的用法。它会查询多个在线商店，根据给定的产品或服务找出最低的价格。
 
 # 实现异步API
+下面定义一个耗时长达一秒的 getPrice()方法。
+
+```
+public class Shop {
+    public static void delay() {
+        try {
+            Thread.sleep(1000L);
+        } catch (TnterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public double getPrice(String product) {
+        return calculatePrice(product);
+    }
+
+    public double calculatePrice(String product) {
+        // 人为引入一秒的延时，模拟耗时处理
+        delay();
+        // 模拟一个商品的价格
+        return random.nextDouble() * product.charAt(0) + product.charAt(1);
+    }
+
+}
+```
+
+## 将同步方法转化为异步方法
+```
+public CompletableFuture<Double> getPriceAsync(String product) {
+    CompletableFuture<Double> future = new CompletableFuture<>();
+    new Thread(() -> {     // 新建一个线程来执行获取价格的逻辑              
+            double price = getPrice(product);
+            future.compelete(price);   // 设置future的返回值
+        }).start();        // 启动一个新线程异步获取price
+
+    return future;         // 不用等到计算出price 即返回一个CompletableFuture对象
+}
+```
+
+## 错误处理
+CompletableFuture 的 completeExceptionally()方法将异步子线程发生的异常传递给调用方。 调用方在调用get方法时会抛出同样的异常。
+```
+public CompletableFuture<Double> getPriceAsync(String product) {
+    CompletableFuture<Double> future = new CompletableFuture<>();
+    new Thread(() -> {
+            try {
+                double price = getPrice(product);
+                future.compelete(price);
+            }  catch () {
+                future.completeExceptionally(e); // 将异常设置到future结果中，传递给调用方
+            }          
+
+        }).start();
+
+    return future;
+}
+```
+
+### 使用CompletableFuture的 supplyAsyncf 工厂方法
+上面的例子可以使用 CompletableFuture 的工厂方法来重写。 CompletableFuture 提供了不少类似的精巧的工厂方法， 我们不用自己来实现一些模板代码。
+```
+public CompletableFuture<Double> getPriceAsync(String product) {
+    return CompletableFuture.supplyAsync(() -> getPrice(product)); // 结合lambda 一行搞定，何止是简洁。 9行变 1行，使用的由于很充分！
+}
+```
+
+
+
 
 
 
