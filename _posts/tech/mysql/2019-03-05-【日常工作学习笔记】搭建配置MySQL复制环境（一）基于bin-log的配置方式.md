@@ -1,6 +1,15 @@
-【配置mysql复制环境】（一）基于bin-log的配置方式
+---
+layout: post
+title:  "搭建配置MySQL复制环境（一）基于bin-log的配置方式"
+date:   2019-03-05 22:30:00 +0800
+tags:
+        - 读书
+        - 技术
+        - MySQL
+        - 数据库
+---
 
-> 基于mysql5.7
+> 学习mysql5.7的 ref-man5.7的整理笔记
 
 复制就是把一台MySQL服务（Master）上的数据拷贝到另外一台或几台MySQL服务器（slaves）上。复制默认是异步进行的 。 根据配置，可以复制MySQL 服务上的全部数据库、指定的数据库或是一个数据库中指定的几个表。
 
