@@ -345,7 +345,8 @@ Table table2 = tableEnv.fromDataStream(stream, "myLong, myString");
 表转为 DataStream 有两种模式:
 
 - Append 模式: 只能用于 动态表有 INSERT 更新的场景，即，数据只能追加，前面的数据不会被更新。
-- Retract 模式: This mode can always be used. It encodes INSERT and DELETE changes with a boolean flag.
+- Retract 模式: 此模式可以用在任何情况下。 会用一个布尔型的标志位来标识是 INSERT 还是 DELETE 的更新。
+
 
 ```java
 // get StreamTableEnvironment. 
@@ -372,10 +373,9 @@ DataStream<Tuple2<String, Integer>> dsTuple =
 DataStream<Tuple2<Boolean, Row>> retractStream = 
   tableEnv.toRetractStream(table, Row.class);
 ```
-note: Note: A detailed discussion about dynamic tables and their properties is given in the [Dynamic Tables](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/table/streaming/dynamic_tables.html) document.
+note: Note: 详见 [动态表文档](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/table/streaming/dynamic_tables.html) .
 
-#### Convert a Table into a DataSet
-A Table is converted into a DataSet as follows:
+#### 将 Table 转换为 DataSet
 
 ```java
 // get BatchTableEnvironment
@@ -396,6 +396,212 @@ DataSet<Tuple2<String, Integer>> dsTuple =
 ```
 
 ### 数据类型与表结构的映射
-### 
+
+Flink’s DataStream 和 DataSet APIs 支持很多种数据类型。 复合类型：Tuples， POJOs， Scala case classes, Flink 的 Row；其它的原子类型。 下面讨论 Table API 是如何转换并在内部表示将这些类型的。
+
+数据类型的映射有两种方式: 基于位置的和基于字段名。
+
+
+#### 基于位置的映射
+
+基于位置的映射可以在保持字段顺序的同时赋予它们有意义的名称。 这种映射方式可以应用于有字段顺序的复合类型也可以用于原子类型。 像 tuples, rows 和 case classes 等复合类型是有字段顺序的。 而 POJO 没有字段顺序，必须使用基于字段名的映射方式。
+
+使用基于位置的映射时， 指定的字段名不能与 输入数据类型的字段名冲突， 否则 API 会认为使用的是基于字段名的映射方式。
+如果没有指定字段名， 对于复合类型会使用该类型的默认字段名与字段顺序，对于原子类型会使用 f0 作为字段名。
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+DataStream<Tuple2<Long, Integer>> stream = ...
+
+// 使用默认字段名 "f0"， "f1"， 将流转换为表
+Table table = tableEnv.fromDataStream(stream);
+
+// 使用字段名 "myLong"， "myInt"， 将流转换为表
+Table table = tableEnv.fromDataStream(stream, "myLong, myInt");
+```
+
+#### Name-based Mapping
+
+基于字段名的映射适用于所有的数据类型，是最灵活的定义表结构的方式。 所有的字段都是以名字来映射的， 也可以为其指定别名， 可以重排字段，或选取指定字段。
+
+ 如果没有指定字段名， 对于复合类型会使用该类型的默认字段名与字段顺序，对于原子类型会使用 f0 作为字段名。
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+DataStream<Tuple2<Long, Integer>> stream = ...
+
+// 使用默认字段名 "f0"， "f1"， 将流转换为表
+Table table = tableEnv.fromDataStream(stream);
+
+// 只将字段 "f1" 从流转换到表
+Table table = tableEnv.fromDataStream(stream, "f1");
+
+// 从流转换到表，并交换字段"f0"，"f1"的顺序
+Table table = tableEnv.fromDataStream(stream, "f1, f0");
+
+// 从流转换到表，并交换字段"f0"，"f1"的顺序，并命名字段为 "myInt", "myLong"
+Table table = tableEnv.fromDataStream(stream, "f1 as myInt, f0 as myLong");
+```
+
+#### 原子类型
+Flink 将原始类型 (Integer, Double, String) 或一般类型 (无法识别解析出来的类型) 看作是原子类型。 原子类型的 DataStream 或 DataSet 映射为只有一个字段的表。 字段类型会根据原子类型来推断， 字段名可以指定。
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+DataStream<Long> stream = ...
+
+// convert DataStream into Table with default field name "f0"
+Table table = tableEnv.fromDataStream(stream);
+
+// convert DataStream into Table with field name "myLong"
+Table table = tableEnv.fromDataStream(stream, "myLong");
+```
+#### Tuples (Scala and Java) and Case Classes (Scala only)
+
+
+Flink 支持 Scala 内置的 tuples 也为Java提供自己实现的 tuple 类。 tuples 类型的   DataStreams 和 DataSets 都可以转换为表。 可以通过为所有字段（基于位置）提供一个名字的方式来重命名字段。 如果没有提供名字，则使用默认字段名。 如果使用了原始的字段名（），则 API 会认为使用的是基于字段名的映射方式。 基于字段名映射可以重排字段顺序，也可以对字段进行投射（sql select as）
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+DataStream<Tuple2<Long, String>> stream = ...
+
+//以默认的字段名 "f0", "f1" 将流转为表
+Table table = tableEnv.fromDataStream(stream);
+
+// 以字段名 "myLong", "myString" (基于位置)  流转为表
+Table table = tableEnv.fromDataStream(stream, "myLong, myString");
+
+// 重排字段 "f1", "f0" (基于字段名) 流转表
+Table table = tableEnv.fromDataStream(stream, "f1, f0");
+
+// 只选择字段 "f1" (基于字段名) 进行流转表
+Table table = tableEnv.fromDataStream(stream, "f1");
+
+// 重排并重命名字段 "myString", "myLong" (基于字段名) 流转表
+Table table = tableEnv.fromDataStream(stream, "f1 as 'myString', f0 as 'myLong'");
+```
+#### POJO (Java and Scala)
+
+Flink 支持将 POJOs 作为复合类型。 POJO 的规则参照 [here](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/api_concepts.html#pojos).
+
+将 POJO DataStream 或 DataSet 转换为表时，不指定字段名时， 使用 POJO 的原始字段名作为表的字段名。 POJO 只能基于字段名来映射， 可以重命名（as）， 重排序， 投射。
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+// Person is a POJO with fields "name" and "age"
+DataStream<Person> stream = ...
+
+// convert DataStream into Table with default field names "age", "name" (fields are ordered by name!)
+Table table = tableEnv.fromDataStream(stream);
+
+// convert DataStream into Table with renamed fields "myAge", "myName" (name-based)
+Table table = tableEnv.fromDataStream(stream, "age as myAge, name as myName");
+
+// convert DataStream into Table with projected field "name" (name-based)
+Table table = tableEnv.fromDataStream(stream, "name");
+
+// convert DataStream into Table with projected and renamed field "myName" (name-based)
+Table table = tableEnv.fromDataStream(stream, "name as myName");
+```
+#### Row
+Row 数据类型支持任意数目的字段，和null 值。 字段名可以通过 RowTypeInfo 或者 DataStream  DataSet 转表时指定。 Row 类型支持基于字段名也支持基于位置的映射。 字段可以通过提供全部字段名（基于位置）来重命名， 或者选择部分的字段（基于字段名）来投射、重排、重命名。
+
+```java
+// get a StreamTableEnvironment, works for BatchTableEnvironment equivalently
+StreamTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
+
+// DataStream of Row with two fields "name" and "age" specified in `RowTypeInfo`
+DataStream<Row> stream = ...
+
+// convert DataStream into Table with default field names "name", "age"
+Table table = tableEnv.fromDataStream(stream);
+
+// convert DataStream into Table with renamed field names "myName", "myAge" (position-based)
+Table table = tableEnv.fromDataStream(stream, "myName, myAge");
+
+// convert DataStream into Table with renamed fields "myName", "myAge" (name-based)
+Table table = tableEnv.fromDataStream(stream, "name as myName, age as myAge");
+
+// convert DataStream into Table with projected field "name" (name-based)
+Table table = tableEnv.fromDataStream(stream, "name");
+
+// convert DataStream into Table with projected and renamed field "myName" (name-based)
+Table table = tableEnv.fromDataStream(stream, "name as myName");
+```
+
 ## 查询优化
+Apache Flink 通过 Apache Calcite 优化、翻译 查询。 目前执行的优化包括投影和过滤器下推、子查询去关联和其他类型的查询重写。Flink还没有优化联接顺序，而是按照查询中定义的相同顺序（FROM子句中表的顺序和/或WHERE子句中联接谓词的顺序）执行它们。
+
+通过提供 CalciteConfig 对象，可以调整在不同阶段应用的优化规则集。这可以通过调用 CalciteConfig.createBuilder() 生成器创建，并通过调用 tableEnv.getConfig.setCalciteConfig(calciteConfig) 提供给TableEnvironment。
+
+
 ### Explaining
+
+TableAPI提供了一种机制来解释计算表的逻辑和优化查询计划。这是通过 TableEnvironment.explain(table) 方法完成的。它返回一个字符串，描述三个计划：
+
+1. 关系查询的抽象语法树， 即未优化的逻辑查询计划
+2. 优化的逻辑查询计划
+3. 物理执行计划
+
+代码如下：
+
+```java
+StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+StreamTableEnvironment tEnv = TableEnvironment.getTableEnvironment(env);
+
+DataStream<Tuple2<Integer, String>> stream1 = env.fromElements(new Tuple2<>(1, "hello"));
+DataStream<Tuple2<Integer, String>> stream2 = env.fromElements(new Tuple2<>(1, "hello"));
+
+Table table1 = tEnv.fromDataStream(stream1, "count, word");
+Table table2 = tEnv.fromDataStream(stream2, "count, word");
+Table table = table1
+  .where("LIKE(word, 'F%')")
+  .unionAll(table2);
+
+String explanation = tEnv.explain(table);
+System.out.println(explanation);
+```
+
+```
+== Abstract Syntax Tree ==
+LogicalUnion(all=[true])
+  LogicalFilter(condition=[LIKE($1, 'F%')])
+    LogicalTableScan(table=[[_DataStreamTable_0]])
+  LogicalTableScan(table=[[_DataStreamTable_1]])
+
+== Optimized Logical Plan ==
+DataStreamUnion(union=[count, word])
+  DataStreamCalc(select=[count, word], where=[LIKE(word, 'F%')])
+    DataStreamScan(table=[[_DataStreamTable_0]])
+  DataStreamScan(table=[[_DataStreamTable_1]])
+
+== Physical Execution Plan ==
+Stage 1 : Data Source
+  content : collect elements with CollectionInputFormat
+
+Stage 2 : Data Source
+  content : collect elements with CollectionInputFormat
+
+  Stage 3 : Operator
+    content : from: (count, word)
+    ship_strategy : REBALANCE
+
+    Stage 4 : Operator
+      content : where: (LIKE(word, 'F%')), select: (count, word)
+      ship_strategy : FORWARD
+
+      Stage 5 : Operator
+        content : from: (count, word)
+        ship_strategy : REBALANCE
+```
+
