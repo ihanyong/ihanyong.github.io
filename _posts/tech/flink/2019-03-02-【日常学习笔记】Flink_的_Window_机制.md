@@ -1,3 +1,13 @@
+---
+layout: post
+title:  "【日常学习笔记】Flink的Window机制"
+date:   2019-03-02 22:30:00 +0800
+tags:
+        - 技术处理
+        - java
+        - Flink
+---
+
 Windows 是处理无限流的核心概念。 Windows 将流分割成有限大小的 buckets, 以在上面应用计算。 
 
 下面是 Flink windowed 代码的一一般结构（套路）。 第一个是有键有， 第二个是无键的。 唯一的区别是有键的调用方式 为keyBy().window()， 无键的为 windowAll()。
