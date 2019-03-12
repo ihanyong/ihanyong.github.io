@@ -31,6 +31,15 @@ for batch query
 </dependency>
 
 ```
+for stream query
+```xml
+<dependency>
+  <groupId>org.apache.flink</groupId>
+  <artifactId>flink-streaming-scala_2.11</artifactId>
+  <version>1.7.2</version>
+</dependency>
+```
+
 note: uber-jar里不要把flink-table打进去（ Apache Calcite 会阻止 classloader 的垃圾回收）。 可以让flink-talbe 放到 system 的 classloader 里 （将./opt/ 下的 flink-talbe.jar 拷贝到 ./lib/ 下）。
 
 # 概念与通用API
