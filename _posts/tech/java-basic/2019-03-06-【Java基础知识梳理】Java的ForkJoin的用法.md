@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "【日常学习笔记】Java的 ForkJoin的用法"
+title:  "【Java基本知识梳理】Java的 ForkJoin的用法"
 date:   2019-03-06 22:30:00 +0800
 tags:
         - 技术
