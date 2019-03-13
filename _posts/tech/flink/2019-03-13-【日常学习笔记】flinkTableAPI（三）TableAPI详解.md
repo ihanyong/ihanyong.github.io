@@ -102,13 +102,81 @@ Java :
 
 ## Aggreagetion
 
-| Operators                  | tags | Description |
-| -------------------------- | ---- | ----------- |
-| GroupBy Aggregation        |      |             |
-| GroupBy Window Aggregation |      |             |
-| OverWindow Aggregation     |      |             |
-| Distinct Aggregation       |      |             |
-| Distinct                   |      |             |
+| Operators                  | tags                | Description                                                  |
+| -------------------------- | ------------------- | ------------------------------------------------------------ |
+| GroupBy Aggregation        | B,S,Result Updating | 类似于SQL的 GROUP BY。 根据分组key 对行进行分组，并接一个聚合算子来对分组的行进行聚合运算。
+<br/>
+```
+Table orders = tableEnv.scan("Orders");
+Table result = orders.groupBy("a").select("a, b.sum as d");
+```
+
+Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
+| GroupBy Window Aggregation | B,S                 | 在分组窗口上进行分组聚合一个表。 可能是一个或多个分组key
+<br/>
+```
+Table orders = tableEnv.scan("Orders");
+Table result = orders
+    .window(Tumble.over("5.minutes").on("rowtime").as("w")) // define window
+    .groupBy("a, w") // group by key and window
+    .select("a, w.start, w.end, w.rowtime, b.sum as d"); // access window properties and aggregate
+``` |
+| OverWindow Aggregation     | S                   | 类似于SQL 的 OVER。 基于窗口范围内的前后行，对每行进行计算
+<br/>```
+Table orders = tableEnv.scan("Orders");
+Table result = orders
+    // define window
+    .window(Over  
+      .partitionBy("a")
+      .orderBy("rowtime")
+      .preceding("UNBOUNDED_RANGE")
+      .following("CURRENT_RANGE")
+      .as("w"))
+    .select("a, b.avg over w, b.max over w, b.min over w"); // sliding aggregate
+```
+
+Note: 所有的聚合必须在相同的窗口上定义，即相同的分片，排序和范围。 当前只支持的之前到现在数据范围的窗口。 还不支持后续范围。 必须在单独地时间属性上指定ORDER BY。 |
+| Distinct Aggregation       | B,S,Result Updating | 与SQL的 DISTINCT聚合类似，如 COUNT(DISTINCT a)。 Distinct aggregation 声明了聚合函数（内置或自定义）只应用于distinct 的输入值上。Distinct 可以用在 GroupBy Aggregation, GroupBy Window Aggregation 和 Over Window Aggregation.
+<br/>
+
+```
+Table orders = tableEnv.scan("Orders");
+// Distinct aggregation on group by
+Table groupByDistinctResult = orders
+    .groupBy("a")
+    .select("a, b.sum.distinct as d");
+// Distinct aggregation on time window group by
+Table groupByWindowDistinctResult = orders
+    .window(Tumble.over("5.minutes").on("rowtime").as("w")).groupBy("a, w")
+    .select("a, b.sum.distinct as d");
+// Distinct aggregation on over window
+Table result = orders
+    .window(Over
+        .partitionBy("a")
+        .orderBy("rowtime")
+        .preceding("UNBOUNDED_RANGE")
+        .as("w"))
+    .select("a, b.avg.distinct over w, b.max over w, b.min over w");
+```
+
+自定义的聚合函数也可以使用DISTINCT修饰符。 想要只针对distinct 值做聚合，只需要在聚合函数后加上distinct修饰符。
+
+
+```
+Table orders = tEnv.scan("Orders");
+
+// Use distinct aggregation for user-defined aggregate functions
+tEnv.registerFunction("myUdagg", new MyUdagg());
+orders.groupBy("users").select("users, myUdagg.distinct(points) as myDistinctResult");
+```
+Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
+| Distinct                   | B,S,Result Updating | 与SQL 的DISTINCT 类似。 返回去重的结果记录
+<br/>
+```
+Table orders = tableEnv.scan("Orders");
+Table result = orders.distinct();
+```
+Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
 
 ## Joins
 
@@ -126,9 +194,55 @@ Table result = left.join(right)
   .where("a = d && ltime >= rtime - 5.minutes && ltime < rtime + 10.minutes")
 
   .select("a, b, e, ltime");</p> |
-| Inner Join with Table Function      | B,S                 | <br/><p></p>                                                 |
-| Left Outer Join with Table Function | B,S                 | <br/><p></p>                                                 |
-| Join with Temporal Table            | B,S                 | <br/><p></p>                                                 |
+| Inner Join with Table Function      | B,S                 | 根据表函数的结果来连接表。左表的每条记录被连接到调用的表函数产生的全部记录。 对于左表的一条记录，如果用他调用表函数返回的结果是空集，则该记录被丢弃。
+<br/>
+```
+// register User-Defined Table Function
+TableFunction<String> split = new MySplitUDTF();
+tableEnv.registerFunction("split", split);
+
+// join
+Table orders = tableEnv.scan("Orders");
+Table result = orders
+    .join(new Table(tableEnv, "split(c)").as("s", "t", "v"))
+    .select("a, b, s, t, v");
+``` |
+| Left Outer Join with Table Function | B,S                 | 根据表函数的结果来连接表。左表的每条记录被连接到调用的表函数产生的全部记录。 对于左表的一条记录，如果用他调用表函数返回的结果是空集，则该记录会被保留，并填充null值。
+<br/>
+Note: 当前，表函数左外部联接的谓词结果只能为空或字符串"true"。
+
+
+```
+// register User-Defined Table Function
+TableFunction<String> split = new MySplitUDTF();
+tableEnv.registerFunction("split", split);
+
+// join
+Table orders = tableEnv.scan("Orders");
+Table result = orders
+    .leftOuterJoin(new Table(tableEnv, "split(c)").as("s", "t", "v"))
+    .select("a, b, s, t, v");
+``` |
+| Join with Temporal Table            | B,S                 | 历史表是随着时间追踪的变更的表。
+<br/>历史表函数允许访问在指定时间点上历史表的状态。 连接历史表的语法与内连接一个表函数是一样的。
+
+
+当前历史表只支持内连接。
+
+```
+Table ratesHistory = tableEnv.scan("RatesHistory");
+
+// register temporal table function with a time attribute and primary key
+TemporalTableFunction rates = ratesHistory.createTemporalTableFunction(
+    "r_proctime",
+    "r_currency");
+tableEnv.registerFunction("rates", rates);
+
+// join with "Orders" based on the time attribute and key
+Table orders = tableEnv.scan("Orders");
+Table result = orders
+    .join(new Table(tEnv, "rates(o_proctime)"), "o_currency = r_currency")
+``` |
 
 ## Set Operations
 
@@ -155,3 +269,6 @@ Table result = left.join(right)
 | ----------- | ---- | ------------------------------------------------------------ |
 | Insert Into | B,S  | 类似SQL中的 INSERT INTO 。执行insert into 操作到一个注册的输出表<br/>输出表必须在 TableEnvironment 中注册过。 注册的表的模式要与查询的模式相匹配<br/><p>Table orders = tableEnv.scan("Orders");<br> orders.insertInto("OutOrders");</p> |
 
+
+
+// [TODO]
