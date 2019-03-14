@@ -177,7 +177,6 @@ Table table = input
   .select("a, w.start, w.end, w.rowtime, b.count"); // aggregate and add window start, end, and rowtime timestamps
 ```
 
-The Window parameter defines how rows are mapped to windows. Window is not an interface that users can implement. Instead, the Table API provides a set of predefined Window classes with specific semantics, which are translated into underlying DataStream or DataSet operations. The supported window definitions are listed below.
 
 Window 参数定义了行是如何映射到窗口的， 用户不能自己实现Window接口。 Table API 提供了一系列不同语义的内置窗口类， 可以翻译为底层的 DataStream 或 DataSet 的算子。 下面是支持的窗口定义：
 
@@ -207,7 +206,6 @@ Tumbling windows are defined by using the Tumble class as follows:
 
 
 ### 滑动窗口
-A sliding window has a fixed size and slides by a specified slide interval. If the slide interval is smaller than the window size, sliding windows are overlapping. Thus, rows can be assigned to multiple windows. For example, a sliding window of 15 minutes size and 5 minute slide interval assigns each row to 3 different windows of 15 minute size, which are evaluated in an interval of 5 minutes. Sliding windows can be defined on event-time, processing-time, or on a row-count.
 
 
 滑动窗口大小固定并按指定的滑动步长进行滑动。 如果滑动步长小于窗口大小， 滑动窗口就会有重叠。 这样数据就会被分配给多个窗口。 如滑动步长为5分钟，大小了15分钟的滑动窗口，一行会被分配给3个窗口。滑动窗口可以基于事件时间，处理时间，行数来定义。
@@ -234,7 +232,6 @@ A sliding window has a fixed size and slides by a specified slide interval. If t
 
 ### Session Window
 
-Session windows do not have a fixed size but their bounds are defined by an interval of inactivity, i.e., a session window is closes if no event appears for a defined gap period. For example a session window with a 30 minute gap starts when a row is observed after 30 minutes inactivity (otherwise the row would be added to an existing window) and is closed if no row is added within 30 minutes. Session windows can work on event-time or processing-time.
 
 会话窗口没有固定的大小， 而是由非活跃的间隔来决定，即超过指定时间没有事件出现的话，窗口就会结束。 如一个30分钟间隔的会话窗口， 在30分钟非活跃状态后，一条记录进来行会开始一个新窗口（没有超过30分钟的话数据会分配到当前窗口），如果30分钟内没有数据进来，窗口就会结束。 会话窗口可以基于事件时间或处理时间来定义。
 
@@ -258,7 +255,9 @@ Table table = input
 ```
 
 OverWindow 定义计算聚合的行的范围。 不能自定义OverWindow接口的实现。 Table API 提供了 Over 类来配置  over window 的属性。  over window 可以基于事件时间或处理时间定义一个时间间隔或行数的范围。 Over 类的方法如下：
+
 ---
+
 #### partitionBy 可选
 基于一个或多个属性对输入进行分片。每个分片都是独立地排序，并分别应用聚合函数。
 Note： 在流环境中， 指定了partition by语句的话，窗口聚合会并行地进行计算。 没有指定 partition by 时，流是被一个单独的，非并行的任务处理。
