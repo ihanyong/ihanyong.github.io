@@ -322,8 +322,8 @@ Note： 对于流查询，必须 声明事件时间或处理时间属性。 当�
 
 
 # Data Types
+Table API 构建在Flink’s DataSet and DataStream APIs 之上。 内部实现上依然是使用 TypeInformation 来定义数据类型。 所有支持类型定义在 `org.apache.flink.table.api.Types`。  下表简要列举了  Table API 类型， SQL类型 与 结果Java类之间的关系：
 
-The Table API is built on top of Flink’s DataSet and DataStream APIs. Internally, it also uses Flink’s TypeInformation to define data types. Fully supported types are listed in org.apache.flink.table.api.Types. The following table summarizes the relation between Table API types, SQL types, and the resulting Java class.
 
 | Table API | SQL | Java type |
 | - | - | - |
@@ -349,18 +349,17 @@ The Table API is built on top of Flink’s DataSet and DataStream APIs. Internal
 
 ---
 
+泛型和(嵌套)复合类型（POJOs, tuples, rows, Scala case classes） 也可以作为行的字段。任意嵌套层级的复合类型的字段可以通过访问函数的访问。
+泛型可以作为一个黑盒，被传递给用户函数进行处理。
 
-Generic types and (nested) composite types (e.g., POJOs, tuples, rows, Scala case classes) can be fields of a row as well.
 
-Fields of composite types with arbitrary nesting can be accessed with value access functions.
-
-Generic types are treated as a black box and can be passed on or processed by user-defined functions.
-
-# Expression Syntax
+# 表达式语法
 
 Some of the operators in previous sections expect one or more expressions. Expressions can be specified using an embedded Scala DSL or as Strings. Please refer to the examples above to learn how expressions can be specified.
 
-This is the EBNF grammar for expressions:
+前面提到的一些算子需要传一个或多个表达式。 表达式可以通过Scala DSL或Strings 来指定。
+
+下面是 EBNF 表达式的语法：
 
 ```
 expressionList = expression , { "," , expression } ;
