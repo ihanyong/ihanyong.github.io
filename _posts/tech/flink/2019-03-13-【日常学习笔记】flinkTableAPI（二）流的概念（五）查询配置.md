@@ -1,7 +1,7 @@
 ---
 layout: post
-title:  "【日常学习笔记】flinkTableAPI-流的概念（五）查询配置"
-date:   2019-03-13 22:30:00 +0800
+title:  "【日常学习笔记】flinkTableAPI（二）流的概念（五）查询配置"
+date:   2019-03-13 20:30:00 +0800
 tags:
         - 流处理
         - java

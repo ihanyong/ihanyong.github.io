@@ -1,7 +1,7 @@
 ---
 layout: post
-title:  "【日常学习笔记】flinkTableAPI-流的概念（四）历史表（时间表）(temporalTables)"
-date:   2019-03-13 22:30:00 +0800
+title:  "【日常学习笔记】flinkTableAPI（二）流的概念（四）历史表（时间表）(temporalTables)"
+date:   2019-03-13 18:30:00 +0800
 tags:
         - 流处理
         - java

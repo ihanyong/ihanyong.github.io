@@ -1,7 +1,7 @@
 ---
 layout: post
-title:  "【日常学习笔记】flinkTableAPI-流的概念（三）持续查询中的Join"
-date:   2019-03-13 22:30:00 +0800
+title:  "【日常学习笔记】flinkTableAPI（二）流的概念（三）持续查询中的Join"
+date:   2019-03-13 16:30:00 +0800
 tags:
         - 流处理
         - java
