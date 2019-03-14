@@ -101,7 +101,7 @@ Java :
 | Operators                  | tags                | Description                                                  |
 | -------------------------- | ------------------- | ------------------------------------------------------------ |
 | GroupBy Aggregation        | B,S,Result Updating | 类似于SQL的 GROUP BY。 根据分组key 对行进行分组，并接一个聚合算子来对分组的行进行聚合运算。 <br/>```Table orders = tableEnv.scan("Orders");```<br/>```Table result = orders.groupBy("a").select("a, b.sum as d");```<br/> <br/> Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
-| GroupBy Window Aggregation | B,S                 | 在分组窗口上进行分组聚合一个表。 可能是一个或多个分组key <br/>``` Table orders = tableEnv.scan("Orders");``` <br/>```Table result = orders .window(Tumble.over("5.minutes").on("rowtime").as("w")) // define ```<br/>```window .groupBy("a, w") // group by key and``` <br/>```window .select("a, w.start, w.end, w.rowtime, b.sum as d"); // access window properties and aggregate``` ​ |
+| GroupBy Window Aggregation | B,S                 | 在分组窗口上进行分组聚合一个表。 可能是一个或多个分组key <br/>``` Table orders = tableEnv.scan("Orders");``` <br/>```Table result = orders .window(Tumble.over("5.minutes").on("rowtime").as("w")) // define ```<br/>```window.groupBy("a, w") // group by key and``` <br/>```window.select("a, w.start, w.end, w.rowtime, b.sum as d"); // access window properties and aggregate``` ​ |
 | OverWindow Aggregation     | S                   | 类似于SQL 的 OVER。 基于窗口范围内的前后行，对每行进行计算<br/> <br/>```Table orders = tableEnv.scan("Orders"); Table result = orders <br/>// define <br/>window .window(Over<br/> .partitionBy("a")<br/> .orderBy("rowtime") <br/>.preceding("UNBOUNDED_RANGE")<br/> .following("CURRENT_RANGE")<br/> .as("w")) <br/>.select("a, b.avg over w, b.max over w, b.min over w"); // sliding aggregate ```<br/>Note: 所有的聚合必须在相同的窗口上定义，即相同的分片，排序和范围。 当前只支持的之前到现在数据范围的窗口。 还不支持后续范围。 必须在单独地时间属性上指定ORDER BY。 |
 | Distinct Aggregation       | B,S,Result Updating | 与SQL的 DISTINCT聚合类似，如 COUNT(DISTINCT a)。 Distinct aggregation 声明了聚合函数（内置或自定义）只应用于distinct 的输入值上。Distinct 可以用在 GroupBy Aggregation, GroupBy Window Aggregation 和 Over Window Aggregation. <br/>  ```Table orders = tableEnv.scan("Orders"); // Distinct aggregation on group by Table groupByDistinctResult = orders .groupBy("a") .select("a, b.sum.distinct as d"); // Distinct aggregation on time window group by Table groupByWindowDistinctResult = orders .window(Tumble.over("5.minutes").on("rowtime").as("w")).groupBy("a, w") .select("a, b.sum.distinct as d");<br/> // Distinct aggregation on over window <br/>Table result = orders .window(Over .partitionBy("a") .orderBy("rowtime") .preceding("UNBOUNDED_RANGE") .as("w")) .select("a, b.avg.distinct over w, b.max over w, b.min over w"); ```<br/> 自定义的聚合函数也可以使用DISTINCT修饰符。 想要只针对distinct 值做聚合，只需要在聚合函数后加上distinct修饰符。  <br/>```Table orders = tEnv.scan("Orders"); <br/>// Use distinct aggregation for user-defined aggregate functions <br/>tEnv.registerFunction("myUdagg", new MyUdagg()); <br/>orders.groupBy("users").select("users, myUdagg.distinct(points) as myDistinctResult");```<br/> Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
 | Distinct                   | B,S,Result Updating | 与SQL 的DISTINCT 类似。 返回去重的结果记录 <br/> ``` Table orders = tableEnv.scan("Orders"); <br/>Table result = orders.distinct(); ```<br/> Note: 对于流查询用来计算查询结果的状态大小会随着不同输入数据增多而无限增长。请提供一个有效保留间隔的查询配置来防止状态存储耗尽。 |
@@ -144,4 +144,300 @@ Java :
 
 
 
-// [TODO]
+## Group Window
+组窗口根据时间或行计数间隔将组中的行聚合为有限组，并对每个组计算一次聚合函数。对于批处理表，Windows是按时间间隔对记录分组的便捷快捷方式。
+
+窗口通过 window 算子来定义，并需要声明一个别名，可以在后面的语句中使用。 为了使用窗口来对表进行分组， 必须像常规使用 groupBy()那样使用将窗口别名做为分组key。 下面的代码展示了如何在表上进行窗口分组：
+Java
+
+```java
+Table table = input
+  .window([Window w].as("w"))  // define window with alias w
+  .groupBy("w")  // group the table by window w
+  .select("b.sum");  // aggregate
+```
+在流环境中， 如果通过groupBy(...) 指定除了窗口外还有其它的分组条件，窗口聚合只能进行并行计算。 一个只指定了窗口别名（一个）的groupBy(...) 语句会在一个单独的，非并行的任务中执行运算。 下面的代码展示了指定额外分组key 的情况。 
+
+Java
+```java
+Table table = input
+  .window([Window w].as("w"))  // define window with alias w
+  .groupBy("w, a")  // group the table by attribute a and window w 
+  .select("a, b.sum");  // aggregate
+```
+
+窗口的属性如开始时间，结束时间或行时间戳等可以在 select 的语句中通过 【w.start, w.end, and w.rowtime】 来使用。 窗口的开始时间与行时间是包含在窗口内的， 结束时间则不在窗口内。 例如： 一个从14:00开始的30分钟的的滚动窗口， 开始时间是【14:00:00.000】， 行时间是【14:29:59.999】， 结束时间是【14:30:00.000】
+
+
+Java
+```java
+Table table = input
+  .window([Window w].as("w"))  // define window with alias w
+  .groupBy("w, a")  // group the table by attribute a and window w 
+  .select("a, w.start, w.end, w.rowtime, b.count"); // aggregate and add window start, end, and rowtime timestamps
+```
+
+The Window parameter defines how rows are mapped to windows. Window is not an interface that users can implement. Instead, the Table API provides a set of predefined Window classes with specific semantics, which are translated into underlying DataStream or DataSet operations. The supported window definitions are listed below.
+
+Window 参数定义了行是如何映射到窗口的， 用户不能自己实现Window接口。 Table API 提供了一系列不同语义的内置窗口类， 可以翻译为底层的 DataStream 或 DataSet 的算子。 下面是支持的窗口定义：
+
+
+### Tumble (Tumbling Windows)
+滚动窗口将行分配为没有重叠，固定长度的连续窗口。 如一个5分钟的滚动窗口将行分为5分钟一组。 滚动窗口可以基于事件时间，处理时间或行数来定义。
+
+Tumbling windows are defined by using the Tumble class as follows:
+滚动窗口通过 Tumble 类来定义：
+
+| Method |  Description |
+| ------ | ------------ |
+| over | 定义窗口的长度，时间或行数间隔 |
+| on   | 分组的时间属性（时间间隔）或行数。对于批查询可以是任何的 Long值或时间属性。对于流查询，必须是一个声明了的事件时间或处理时间属性。 |
+| as   | 为窗口声名一个别名。 这个别名可以在后面的 groupBy()中使用， 也可以在select中用于获取窗口的属性（开始结束行时间）|
+
+```java
+// Tumbling Event-time Window
+.window(Tumble.over("10.minutes").on("rowtime").as("w"));
+
+// Tumbling Processing-time Window (assuming a processing-time attribute "proctime")
+.window(Tumble.over("10.minutes").on("proctime").as("w"));
+
+// Tumbling Row-count Window (assuming a processing-time attribute "proctime")
+.window(Tumble.over("10.rows").on("proctime").as("w"));
+```
+
+
+### 滑动窗口
+A sliding window has a fixed size and slides by a specified slide interval. If the slide interval is smaller than the window size, sliding windows are overlapping. Thus, rows can be assigned to multiple windows. For example, a sliding window of 15 minutes size and 5 minute slide interval assigns each row to 3 different windows of 15 minute size, which are evaluated in an interval of 5 minutes. Sliding windows can be defined on event-time, processing-time, or on a row-count.
+
+
+滑动窗口大小固定并按指定的滑动步长进行滑动。 如果滑动步长小于窗口大小， 滑动窗口就会有重叠。 这样数据就会被分配给多个窗口。 如滑动步长为5分钟，大小了15分钟的滑动窗口，一行会被分配给3个窗口。滑动窗口可以基于事件时间，处理时间，行数来定义。
+
+滑动窗口通过 Slide 类来定义：
+
+| Method |  Description |
+| ------ | ------------ |
+| over | 定义窗口的长度，时间或行数间隔 |
+| every | 定义窗口的步长，时间或行数间隔。步长必须与长度的类型一致 |
+|on | 分组的时间属性（时间间隔）或行数。对于批查询可以是任何的 Long值或时间属性。对于流查询，必须是一个声明了的事件时间或处理时间属性。 |
+| as | 为窗口声名一个别名。 这个别名可以在后面的 groupBy()中使用， 也可以在select中用于获取窗口的属性（开始结束行时间） |
+
+```java
+// Sliding Event-time Window
+.window(Slide.over("10.minutes").every("5.minutes").on("rowtime").as("w"));
+
+// Sliding Processing-time window (assuming a processing-time attribute "proctime")
+.window(Slide.over("10.minutes").every("5.minutes").on("proctime").as("w"));
+
+// Sliding Row-count window (assuming a processing-time attribute "proctime")
+.window(Slide.over("10.rows").every("5.rows").on("proctime").as("w"));
+```
+
+### Session Window
+
+Session windows do not have a fixed size but their bounds are defined by an interval of inactivity, i.e., a session window is closes if no event appears for a defined gap period. For example a session window with a 30 minute gap starts when a row is observed after 30 minutes inactivity (otherwise the row would be added to an existing window) and is closed if no row is added within 30 minutes. Session windows can work on event-time or processing-time.
+
+会话窗口没有固定的大小， 而是由非活跃的间隔来决定，即超过指定时间没有事件出现的话，窗口就会结束。 如一个30分钟间隔的会话窗口， 在30分钟非活跃状态后，一条记录进来行会开始一个新窗口（没有超过30分钟的话数据会分配到当前窗口），如果30分钟内没有数据进来，窗口就会结束。 会话窗口可以基于事件时间或处理时间来定义。
+
+会话窗口通过 Session 类来定义：
+
+| Method |  Description |
+| ------ | ------------ |
+| withGap | 定义两个时间窗口之间的时间间隙 |
+|on | 分组的时间属性（时间间隔）或行数。对于批查询可以是任何的 Long值或时间属性。对于流查询，必须是一个声明了的事件时间或处理时间属性。 |
+| as | 为窗口声名一个别名。 这个别名可以在后面的 groupBy()中使用， 也可以在select中用于获取窗口的属性（开始结束行时间） |
+
+## Over Window
+Over window 聚合类似于标准SQL中OVER语句。 在查询的SELECT语句中的定义。 与通过 GROUP BY 语句指定的 group window 不同， over window不对行进行折叠， 而是针对每个输入行在它相邻范围的行上进行聚合计算。
+
+Over windows 通过 window(w: OverWindow*) 算子定义，并在 select()方法中通过别名引用。
+
+```java
+Table table = input
+  .window([OverWindow w].as("w"))           // define over window with alias w
+  .select("a, b.sum over w, c.min over w"); // aggregate over the over window w
+```
+
+OverWindow 定义计算聚合的行的范围。 不能自定义OverWindow接口的实现。 Table API 提供了 Over 类来配置  over window 的属性。  over window 可以基于事件时间或处理时间定义一个时间间隔或行数的范围。 Over 类的方法如下：
+---
+#### partitionBy 可选
+基于一个或多个属性对输入进行分片。每个分片都是独立地排序，并分别应用聚合函数。
+Note： 在流环境中， 指定了partition by语句的话，窗口聚合会并行地进行计算。 没有指定 partition by 时，流是被一个单独的，非并行的任务处理。
+
+
+#### orderBy 必须
+定义每个分片内的排序，从而聚合函数以这个顺序应用到行上面。
+
+Note： 对于流查询，必须 声明事件时间或处理时间属性。 当前只支持一个排序属性。
+
+
+#### preceding 必须
+定义当前行之前的包含在窗口内的行的间距。 间距可以被定义为时间也可以是行数。
+- 有界的 over windows 通过间距大小来指定，如时间间距【10.minutes】， 行数间距【10.rows】
+- 无界的 over windows 通过固定字符串来指定，如【UNBOUNDED_RANGE】来定义时间，【UNBOUNDED_ROW】来定义行数。 无界的 over windows 从该分片的第一条数据开始。
+
+#### following 可选
+
+定义当前行之后的包含在窗口内的行的间距。 间距可以被定义为时间也可以是行数。 必须与preceding定义使用的单位相同。
+
+当前还不支持指定后续行。 可以指定如下两个常量字符串：
+
+- CURRENT_ROW 将窗口上界设置为当前行。
+- CURRENT_RANGE 将窗口上界设置为当前行的排序键，即：与当前行的排序键相同的所有行都包含在窗口内。
+
+如果省略了 following， 时间窗口的上界默认为CURRENT_RANGE， 行数窗口的上界默认为CURRENT_ROW
+
+##### as  必须
+为窗口声名一个别名。 这个别名在select()中用来引用 over window。
+
+---
+
+### 无界的 Over window
+```java
+// Unbounded Event-time over window (assuming an event-time attribute "rowtime")
+.window(Over.partitionBy("a").orderBy("rowtime").preceding("unbounded_range").as("w"));
+
+// Unbounded Processing-time over window (assuming a processing-time attribute "proctime")
+.window(Over.partitionBy("a").orderBy("proctime").preceding("unbounded_range").as("w"));
+
+// Unbounded Event-time Row-count over window (assuming an event-time attribute "rowtime")
+.window(Over.partitionBy("a").orderBy("rowtime").preceding("unbounded_row").as("w"));
+ 
+// Unbounded Processing-time Row-count over window (assuming a processing-time attribute "proctime")
+.window(Over.partitionBy("a").orderBy("proctime").preceding("unbounded_row").as("w"));
+```
+### 有界的 Over window
+```java
+// Bounded Event-time over window (assuming an event-time attribute "rowtime")
+.window(Over.partitionBy("a").orderBy("rowtime").preceding("1.minutes").as("w"))
+
+// Bounded Processing-time over window (assuming a processing-time attribute "proctime")
+.window(Over.partitionBy("a").orderBy("proctime").preceding("1.minutes").as("w"))
+
+// Bounded Event-time Row-count over window (assuming an event-time attribute "rowtime")
+.window(Over.partitionBy("a").orderBy("rowtime").preceding("10.rows").as("w"))
+ 
+// Bounded Processing-time Row-count over window (assuming a processing-time attribute "proctime")
+.window(Over.partitionBy("a").orderBy("proctime").preceding("10.rows").as("w"))
+```
+
+
+# Data Types
+
+The Table API is built on top of Flink’s DataSet and DataStream APIs. Internally, it also uses Flink’s TypeInformation to define data types. Fully supported types are listed in org.apache.flink.table.api.Types. The following table summarizes the relation between Table API types, SQL types, and the resulting Java class.
+
+| Table API | SQL | Java type |
+| - | - | - |
+| Types.STRING |  VARCHAR | java.lang.String |
+| Types.BOOLEAN | BOOLEAN | java.lang.Boolean |
+| Types.BYTE |  TINYINT | java.lang.Byte |
+| Types.SHORT | SMALLINT |  java.lang.Short |
+| Types.INT | INTEGER, INT |  java.lang.Integer |
+| Types.LONG |  BIGINT |  java.lang.Long |
+| Types.FLOAT | REAL, FLOAT | java.lang.Float |
+| Types.DOUBLE |  DOUBLE |  java.lang.Double |
+| Types.DECIMAL | DECIMAL | java.math.BigDecimal |
+| Types.SQL_DATE |  DATE |  java.sql.Date |
+| Types.SQL_TIME |  TIME |  java.sql.Time |
+| Types.SQL_TIMESTAMP | TIMESTAMP(3) |  java.sql.Timestamp |
+| Types.INTERVAL_MONTHS | INTERVAL YEAR TO MONTH |  java.lang.Integer |
+| Types.INTERVAL_MILLIS | INTERVAL DAY TO SECOND(3) | java.lang.Long |
+| Types.PRIMITIVE_ARRAY | ARRAY | e.g. int[] |
+| Types.OBJECT_ARRAY |  ARRAY | e.g. java.lang.Byte[] |
+| Types.MAP | MAP | java.util.HashMap |
+| Types.MULTISET |  MULTISET |  e.g. java.util.HashMap<String, Integer> for a multiset of String |
+| Types.ROW | ROW | org.apache.flink.types.Row |
+
+---
+
+
+Generic types and (nested) composite types (e.g., POJOs, tuples, rows, Scala case classes) can be fields of a row as well.
+
+Fields of composite types with arbitrary nesting can be accessed with value access functions.
+
+Generic types are treated as a black box and can be passed on or processed by user-defined functions.
+
+# Expression Syntax
+
+Some of the operators in previous sections expect one or more expressions. Expressions can be specified using an embedded Scala DSL or as Strings. Please refer to the examples above to learn how expressions can be specified.
+
+This is the EBNF grammar for expressions:
+
+```
+expressionList = expression , { "," , expression } ;
+
+expression = timeIndicator | overConstant | alias ;
+
+alias = logic | ( logic , "as" , fieldReference ) | ( logic , "as" , "(" , fieldReference , { "," , fieldReference } , ")" ) ;
+
+logic = comparison , [ ( "&&" | "||" ) , comparison ] ;
+
+comparison = term , [ ( "=" | "==" | "===" | "!=" | "!==" | ">" | ">=" | "<" | "<=" ) , term ] ;
+
+term = product , [ ( "+" | "-" ) , product ] ;
+
+product = unary , [ ( "*" | "/" | "%") , unary ] ;
+
+unary = [ "!" | "-" | "+" ] , composite ;
+
+composite = over | suffixed | nullLiteral | prefixed | atom ;
+
+suffixed = interval | suffixAs | suffixCast | suffixIf | suffixDistinct | suffixFunctionCall ;
+
+prefixed = prefixAs | prefixCast | prefixIf | prefixDistinct | prefixFunctionCall ;
+
+interval = timeInterval | rowInterval ;
+
+timeInterval = composite , "." , ("year" | "years" | "quarter" | "quarters" | "month" | "months" | "week" | "weeks" | "day" | "days" | "hour" | "hours" | "minute" | "minutes" | "second" | "seconds" | "milli" | "millis") ;
+
+rowInterval = composite , "." , "rows" ;
+
+suffixCast = composite , ".cast(" , dataType , ")" ;
+
+prefixCast = "cast(" , expression , dataType , ")" ;
+
+dataType = "BYTE" | "SHORT" | "INT" | "LONG" | "FLOAT" | "DOUBLE" | "BOOLEAN" | "STRING" | "DECIMAL" | "SQL_DATE" | "SQL_TIME" | "SQL_TIMESTAMP" | "INTERVAL_MONTHS" | "INTERVAL_MILLIS" | ( "MAP" , "(" , dataType , "," , dataType , ")" ) | ( "PRIMITIVE_ARRAY" , "(" , dataType , ")" ) | ( "OBJECT_ARRAY" , "(" , dataType , ")" ) ;
+
+suffixAs = composite , ".as(" , fieldReference , ")" ;
+
+prefixAs = "as(" , expression, fieldReference , ")" ;
+
+suffixIf = composite , ".?(" , expression , "," , expression , ")" ;
+
+prefixIf = "?(" , expression , "," , expression , "," , expression , ")" ;
+
+suffixDistinct = composite , "distinct.()" ;
+
+prefixDistinct = functionIdentifier , ".distinct" , [ "(" , [ expression , { "," , expression } ] , ")" ] ;
+
+suffixFunctionCall = composite , "." , functionIdentifier , [ "(" , [ expression , { "," , expression } ] , ")" ] ;
+
+prefixFunctionCall = functionIdentifier , [ "(" , [ expression , { "," , expression } ] , ")" ] ;
+
+atom = ( "(" , expression , ")" ) | literal | fieldReference ;
+
+fieldReference = "*" | identifier ;
+
+nullLiteral = "Null(" , dataType , ")" ;
+
+timeIntervalUnit = "YEAR" | "YEAR_TO_MONTH" | "MONTH" | "QUARTER" | "WEEK" | "DAY" | "DAY_TO_HOUR" | "DAY_TO_MINUTE" | "DAY_TO_SECOND" | "HOUR" | "HOUR_TO_MINUTE" | "HOUR_TO_SECOND" | "MINUTE" | "MINUTE_TO_SECOND" | "SECOND" ;
+
+timePointUnit = "YEAR" | "MONTH" | "DAY" | "HOUR" | "MINUTE" | "SECOND" | "QUARTER" | "WEEK" | "MILLISECOND" | "MICROSECOND" ;
+
+over = composite , "over" , fieldReference ;
+
+overConstant = "current_row" | "current_range" | "unbounded_row" | "unbounded_row" ;
+
+timeIndicator = fieldReference , "." , ( "proctime" | "rowtime" ) ;
+```
+
+Here, literal is a valid Java literal. String literals can be specified using single or double quotes. Duplicate the quote for escaping (e.g. 'It''s me.' or "I ""like"" dogs.").
+
+The fieldReference specifies a column in the data (or all columns if * is used), and functionIdentifier specifies a supported scalar function. The column names and function names follow Java identifier syntax.
+
+Expressions specified as strings can also use prefix notation instead of suffix notation to call operators and functions.
+
+If working with exact numeric values or large decimals is required, the Table API also supports Java’s BigDecimal type. In the Scala Table API decimals can be defined by BigDecimal("123456") and in Java by appending a “p” for precise e.g. 123456p.
+
+In order to work with temporal values the Table API supports Java SQL’s Date, Time, and Timestamp types. In the Scala Table API literals can be defined by using java.sql.Date.valueOf("2016-06-27"), java.sql.Time.valueOf("10:10:42"), or java.sql.Timestamp.valueOf("2016-06-27 10:10:42.123"). The Java and Scala Table API also support calling "2016-06-27".toDate(), "10:10:42".toTime(), and "2016-06-27 10:10:42.123".toTimestamp() for converting Strings into temporal types. Note: Since Java’s temporal SQL types are time zone dependent, please make sure that the Flink Client and all TaskManagers use the same time zone.
+
+Temporal intervals can be represented as number of months (Types.INTERVAL_MONTHS) or number of milliseconds (Types.INTERVAL_MILLIS). Intervals of same type can be added or subtracted (e.g. 1.hour + 10.minutes). Intervals of milliseconds can be added to time points (e.g. "2016-08-10".toDate + 5.days).
