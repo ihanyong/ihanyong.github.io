@@ -1,3 +1,10 @@
+---
+layout: post
+title:  "【Java基础知识梳理】JavaIO"
+date:   2019-04-04 22:30:00 +0800
+tags:
+        - java IO
+---
 
 # java IO概念与历史
 B: blocking
@@ -104,20 +111,17 @@ byte数组流的 public 方法 基本上都是 synchronized的。
 
 
 ### 过滤器流(FilterInputStream/FileOutputStream)
+可以理解为一个装饰器模式的应用。  过滤器流内部封装了一个底层流，FilterInputStream/FileOutputStream本身就是简单的重写了InputStream/OutputStream所有的方法，使用所有的参数直接调用底层流。 过滤器的子类可以根据需要重写某些方法来添加额外的功能。
 
+#### 过滤器流的子类
+##### 缓冲流
+##### 数据流
+##### 回推流
+##### 打印流 (PrintStream)
+hello world 中的 System.out 即是一个 PrintStream。
 
-                BufferedInputStream
-                PushbackInputStream
-                DataInputStream
-
-                PrintStream
-                DataOutputStream
-                BufferedOutputStream
-
-
-
-
-
-
+PrintStream 为其它的输出流添加额外的功能： 方便地打印出种类数据值的表示。
+与其它的输出流不同，PrintStream不会抛出 IOException， 有异常时会设置一个可能通过checkError方法访问的内部状态。PrintStream创建的时候可以设置为自动flush， 这样当写入byte数组、调用println方法 或是写入了'\n'时， flush()方法会自动调用。
+所有PrintStream打印的字符都是使用平台默认的字符编码bytes转换而来的。 在需要写入字符而不是字节的场景，应该使用PrintWriter。 
 
 # 字符流 [todo]
