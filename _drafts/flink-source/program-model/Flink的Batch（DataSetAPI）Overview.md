@@ -480,33 +480,166 @@ myResult.output(new LocalCollectionOutputFormat(outData));
 语义注解的使用是可选的。 一定要正确的使用， 错误的用法会导致错误的结果，宁可不用也不要用错。
 
 ### Forwarded Fields Annotation
-转发字段注解声明了输入字段中哪些是不修改直接转发到输出对象的相同或不同位置。 优化器使用这些信息业推断排序或分片是不是被函数保留。 
+转发字段注解用于声明输入字段中，哪些字段不需要修改而直接转发到输出对象的相同或不同位置。 优化器使用这些信息可以推断数据的排序或分片是不是可以保留不变。 
 
-
-Forwarded fields information declares input fields which are unmodified forwarded by a function to the same position or to another position in the output. This information is used by the optimizer to infer whether a data property such as sorting or partitioning is preserved by a function. For functions that operate on groups of input elements such as GroupReduce, GroupCombine, CoGroup, and MapPartition, all fields that are defined as forwarded fields must always be jointly forwarded from the same input element. The forwarded fields of each element that is emitted by a group-wise function may originate from a different element of the function’s input group.
-
-Field forward information is specified using field expressions. Fields that are forwarded to the same position in the output can be specified by their position. The specified position must be valid for the input and output data type and have the same type. For example the String "f2" declares that the third field of a Java input tuple is always equal to the third field in the output tuple.
-
-Fields which are unmodified forwarded to another position in the output are declared by specifying the source field in the input and the target field in the output as field expressions. The String "f0->f2" denotes that the first field of the Java input tuple is unchanged copied to the third field of the Java output tuple. The wildcard expression * can be used to refer to a whole input or output type, i.e., "f0->*" denotes that the output of a function is always equal to the first field of its Java input tuple.
-
-Multiple forwarded fields can be declared in a single String by separating them with semicolons as "f0; f2->f1; f3->f2" or in separate Strings "f0", "f2->f1", "f3->f2". When specifying forwarded fields it is not required that all forwarded fields are declared, but all declarations must be correct.
-
-Forwarded field information can be declared by attaching Java annotations on function class definitions or by passing them as operator arguments after invoking a function on a DataSet as shown below.
-
-
+【TODO】
 ### Non-Forwarded Fields
+【TODO】
 ### Read Fields
+【TODO】
+
+# Broadcast Variables  广播变量
+广播变量允许一个算子所有的并行实例都可以访问一个额外的数据集。 对于辅助数据集或依赖数据集来说，很有用。 在算子函数中会以Collection的形式来访问这个数据集。
+- 广播： 使用 withBroadcastSet(DataSet, String)来注册一个数据集
+- 访问： 在算子里使用getRuntimeContext().getBroadcastVariable(String) 获取数据集
+
+```java
+// 1. The DataSet to be broadcast
+DataSet<Integer> toBroadcast = env.fromElements(1, 2, 3);
+
+DataSet<String> data = env.fromElements("a", "b");
+
+data.map(new RichMapFunction<String, String>() {
+    @Override
+    public void open(Configuration parameters) throws Exception {
+      // 3. Access the broadcast DataSet as a Collection
+      Collection<Integer> broadcastSet = getRuntimeContext().getBroadcastVariable("broadcastSetName");
+    }
 
 
-# Broadcast Variables
+    @Override
+    public String map(String value) throws Exception {
+        ...
+    }
+}).withBroadcastSet(toBroadcast, "broadcastSetName"); // 2. Broadcast the DataSet
+```
 
+确保注册和获取数据集时使用的名称是一致的。
+广播变量是存放在每个节点的内存中的，所以这个数据集不能太大。 
+对于标量值这样简单的事情，可以简单地将参数作为函数闭包的一部分，或者使用withParameters(...)方法传入配置。
 
-# Distributed Cache
+# Distributed Cache 分布式缓存
+类似于Hadoop， Flink提供了分布式缓存的功能， 使得UDF的每一个并行实例可以以本地化的方式来访问文件。 这个功能可以用于共享那些包含了静态数据（字典，机器学习回归模型）的文件。
+
+程序在ExecutionEnvironment中注册一个本地或远程的文件/目录作为缓存文件。 当程序执行时， Flink会自动地将该文件/目录拷贝到所有工作节点的本地文件系统中。 UDF可以通过注册名从本地文件系统访问该文件/目录。
+
+通过ExecutionEnvironment注册
+```java
+ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+
+// register a file from HDFS
+env.registerCachedFile("hdfs:///path/to/your/file", "hdfsFile")
+
+// register a local executable file (script, executable, ...)
+env.registerCachedFile("file:///path/to/exec/file", "localExecFile", true)
+
+// define your program and execute
+...
+DataSet<String> input = ...
+DataSet<Integer> result = input.map(new MyMapper());
+...
+env.execute();
+```
+
+访问时UDF要是RichFunction
+```java
+// extend a RichFunction to have access to the RuntimeContext
+public final class MyMapper extends RichMapFunction<String, Integer> {
+
+    @Override
+    public void open(Configuration config) {
+
+      // access cached file via RuntimeContext and DistributedCache
+      File myFile = getRuntimeContext().getDistributedCache().getFile("hdfsFile");
+      // read the file (or navigate the directory)
+      ...
+    }
+
+    @Override
+    public Integer map(String value) throws Exception {
+      // use content of cached file
+      ...
+    }
+}
+```
 
 
 # Passing Parameters to Functions
+可以通过构造函数或withParameters(Configuration)方法向UDF传递参数。 这些参数被作为UDF的一部分序列化并分发到任务所有的并发实例上。
+
+[最佳实践-如何传递命令行参数到UDF](https://ci.apache.org/projects/flink/flink-docs-release-1.7/dev/best_practices.html#parsing-command-line-arguments-and-passing-them-around-in-your-flink-application)
+
+#### 通过构造函数
+```java
+DataSet<Integer> toFilter = env.fromElements(1, 2, 3);
+
+toFilter.filter(new MyFilter(2));
+
+private static class MyFilter implements FilterFunction<Integer> {
+
+  private final int limit;
+
+  public MyFilter(int limit) {
+    this.limit = limit;
+  }
+
+  @Override
+  public boolean filter(Integer value) throws Exception {
+    return value > limit;
+  }
+}
 
 
+```
+
+#### 通过 withParameters(Configuration)
+本方法接收一个 Configuration对象作为入参， 被传递到 rich function 的open()方法。
+
+```java
+DataSet<Integer> toFilter = env.fromElements(1, 2, 3);
+
+Configuration config = new Configuration();
+config.setInteger("limit", 2);
+
+toFilter.filter(new RichFilterFunction<Integer>() {
+    private int limit;
+
+    @Override
+    public void open(Configuration parameters) throws Exception {
+      limit = parameters.getInteger("limit", 0);
+    }
+
+    @Override
+    public boolean filter(Integer value) throws Exception {
+      return value > limit;
+    }
+}).withParameters(config)
+```
+
+#### 通过ExecutionConfig传递全局参数
+
+```java
 
 
+Configuration conf = new Configuration();
+conf.setString("mykey","myvalue");
+final ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+env.getConfig().setGlobalJobParameters(conf);
 
+
+```
+
+
+```java
+public static final class Tokenizer extends RichFlatMapFunction<String, Tuple2<String, Integer>> {
+
+    private String mykey;
+    @Override
+    public void open(Configuration parameters) throws Exception {
+      super.open(parameters);
+      ExecutionConfig.GlobalJobParameters globalParams = getRuntimeContext().getExecutionConfig().getGlobalJobParameters();
+      Configuration globConf = (Configuration) globalParams;
+      mykey = globConf.getString("mykey", null);
+    }
+    // ... more here ...
+```
