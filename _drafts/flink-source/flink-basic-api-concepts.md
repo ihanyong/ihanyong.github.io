@@ -1,1 +1,3 @@
-flink-basic-api-concepts
+Flink 基本API的概念
+
+Flink 程序实现了一系统的数据转换。 从 source 获取数据，结果通过 sink 输出。 Flink 程序可以运行在各种上下文中， 独立运行， 嵌入式别的程序中。 可以在本地JVM中运行，也可以在机器集群上运行。
