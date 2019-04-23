@@ -7,7 +7,7 @@ tags:
 ---
 
 
-![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty\imgs\inoutbound-1.png)
+![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/inoutbound-1.png)
 
 
 如上图所示， Channel 的handler 被 ChannelPipleLine组织为一个双向链表： 链表的节点是HandlerContext，Handler包含在HandlerContext中。
@@ -33,11 +33,11 @@ ChannelOutboundInvoker 定义了所有的出站方法，如下力所示
 
 
 
-![inout invoker impl](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs\inoutbound.png)
+![inout invoker impl](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/inoutbound.png)
 
 通过 AbstractChannel 的源码可知，Channel的出站方法实质上也是调用了 ChannelPipeLine对应的出站方法。
 
-![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs\AbstractChannel-src-outbound.png)
+![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/AbstractChannel-src-outbound.png)
 
 
 
@@ -51,7 +51,7 @@ netty 中 ChannelPipeline 的实现是 DefaultChannelPipelie。 阅读源码可�
 
 参考下面的类图
 
-![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs\ChannelHandler-Class.png)
+![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/ChannelHandler-Class.png)
 
 
 ChanelHandler 中只定义了Handler 是3个生命周期方法。
@@ -60,9 +60,9 @@ ChanelHandler 中只定义了Handler 是3个生命周期方法。
 
 子接口ChannelOutboundHandler 定义了触发出站事件的方法， 与ChannelOutboundInvoker中的出站方法是相对应的。
 
-![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs\channelInboundHandler-methods.png)
+![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/channelInboundHandler-methods.png)
 
-![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs\ChannelOutboundHandler.png)
+![](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/ChannelOutboundHandler.png)
 
 
 几个主要的Handler实现，ChannelInboundHandlerAdapter，ChannelOutboundHandlerAdapter，ChannelDuplexHandler，都是将方法调用委托给了HandlerContext对应的方法。 如果我们自己去实现一些Handler 的话，如果不需要事件继续往后走，就不需要再调用context对应的方法了， 如果需要后续Handler继续处理，则一定不要忘记调用context对应的方法。
