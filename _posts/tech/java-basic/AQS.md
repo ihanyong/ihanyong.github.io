@@ -57,7 +57,7 @@ Node 定义了两种模式
 
         /** waitStatus value ： 线程已取消 */
         static final int CANCELLED =  1;
-        /** waitStatus value ： 需要通知后继节点 */
+        /** waitStatus value ： 需要通知后继节点 */  
         static final int SIGNAL    = -1;
         /** waitStatus value ： 节点在条件上等待 */
         static final int CONDITION = -2;
@@ -465,23 +465,9 @@ Node 定义了两种模式
      */
     private void setHeadAndPropagate(Node node, int propagate) {
         Node h = head; // Record old head for check below
+        // 将 node 设置为 head
         setHead(node);
-        /*
-         * Try to signal next queued node if:
-         *   Propagation was indicated by caller,
-         *     or was recorded (as h.waitStatus either before
-         *     or after setHead) by a previous operation
-         *     (note: this uses sign-check of waitStatus because
-         *      PROPAGATE status may transition to SIGNAL.)
-         * and
-         *   The next node is waiting in shared mode,
-         *     or we don't know, because it appears null
-         *
-         * The conservatism in both of these checks may cause
-         * unnecessary wake-ups, but only when there are multiple
-         * racing acquires/releases, so most need signals now or soon
-         * anyway.
-         */
+        // 如果资源还有余量，唤醒下一个线程
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
             (h = head) == null || h.waitStatus < 0) {
             Node s = node.next;
@@ -498,17 +484,6 @@ Node 定义了两种模式
      * to calling unparkSuccessor of head if it needs signal.)
      */
     private void doReleaseShared() {
-        /*
-         * Ensure that a release propagates, even if there are other
-         * in-progress acquires/releases.  This proceeds in the usual
-         * way of trying to unparkSuccessor of head if it needs
-         * signal. But if it does not, status is set to PROPAGATE to
-         * ensure that upon release, propagation continues.
-         * Additionally, we must loop in case a new node is added
-         * while we are doing this. Also, unlike other uses of
-         * unparkSuccessor, we need to know if CAS to reset status
-         * fails, if so rechecking.
-         */
         for (;;) {
             Node h = head;
             if (h != null && h != tail) {
@@ -516,6 +491,7 @@ Node 定义了两种模式
                 if (ws == Node.SIGNAL) {
                     if (!compareAndSetWaitStatus(h, Node.SIGNAL, 0))
                         continue;            // loop to recheck cases
+                    // 唤醒后继线程
                     unparkSuccessor(h);
                 }
                 else if (ws == 0 &&
@@ -542,11 +518,37 @@ Node 定义了两种模式
      * @return the value returned from {@link #tryReleaseShared}
      */
     public final boolean releaseShared(int arg) {
+        // 如果tryReleaseShared返回true, 则解除后面一个或若干线程的阻塞状态
         if (tryReleaseShared(arg)) {
             doReleaseShared();
             return true;
         }
         return false;
+    }
+
+    /**
+     * Attempts to set the state to reflect a release in shared mode.
+     *
+     * <p>This method is always invoked by the thread performing release.
+     *
+     * <p>The default implementation throws
+     * {@link UnsupportedOperationException}.
+     *
+     * @param arg the release argument. This value is always the one
+     *        passed to a release method, or the current state value upon
+     *        entry to a condition wait.  The value is otherwise
+     *        uninterpreted and can represent anything you like.
+     * @return {@code true} if this release of shared mode may permit a
+     *         waiting acquire (shared or exclusive) to succeed; and
+     *         {@code false} otherwise
+     * @throws IllegalMonitorStateException if releasing would place this
+     *         synchronizer in an illegal state. This exception must be
+     *         thrown in a consistent fashion for synchronization to work
+     *         correctly.
+     * @throws UnsupportedOperationException if shared mode is not supported
+     */
+    protected boolean tryReleaseShared(int arg) {
+        throw new UnsupportedOperationException();
     }
 
 ```
