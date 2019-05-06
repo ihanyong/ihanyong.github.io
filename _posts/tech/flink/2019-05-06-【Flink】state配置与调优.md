@@ -109,7 +109,7 @@ mapper-id   | State of StatefulMapper
 
 如果使用的是MemoryStateBackend ， 元数据和保存点状态都是保存在 _metadata 文件中的， 因为是一个自包含的文件，可以将文件移动到任意的位置并加载恢复。
 
-不建议移动或删除运行中的作业的最后一个保存点。 因为可能会影响容错恢复机制。 保存点对 exactly-once sink 是有副作用的：为了保存　 exactly-once　的语义，　如果在最后一次savepoint 之后没有生成检查点，会使用savepoint来进行恢复。
+不建议移动或删除运行中的作业的最后一个保存点。 因为可能会影响容错恢复机制。 保存点对 exactly-once sink 是有副作用的：为了保证　 exactly-once　的语义，　如果在最后一次savepoint 之后没有生成检查点，会使用savepoint来进行恢复。
 
 触发保存点
 ```
