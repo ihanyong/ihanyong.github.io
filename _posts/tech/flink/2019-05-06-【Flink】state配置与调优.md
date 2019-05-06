@@ -8,10 +8,10 @@ tags:
 ---
 
 参考
--  (Checkpoints)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/checkpoints.html]
--  (Savepoints)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/savepoints.html]
--  (State Backends)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/state_backends.html]
--  (Tuning Checkpoints and Large State)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/large_state_tuning.html]
+-  [Checkpoints](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/checkpoints.html)
+-  [Savepoints](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/savepoints.html])
+-  [State Backends](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/state_backends.html)
+-  [Tuning Checkpoints and Large State](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/large_state_tuning.html)
 
 # CheckPoint
 
@@ -105,7 +105,7 @@ mapper-id   | State of StatefulMapper
 /savepoints/savepoints-:shortjobid-:savepointid/...
 ```
 
-因为元数据中保存是的绝对路径，所以现在保存点的数据文件是不能移动的。  这个限制正在通过这个 (LINK-5778)[https://issues.apache.org/jira/browse/FLINK-5778] 进行解决。
+因为元数据中保存是的绝对路径，所以现在保存点的数据文件是不能移动的。  这个限制正在通过这个[LINK-5778](https://issues.apache.org/jira/browse/FLINK-5778) 进行解决。
 
 如果使用的是MemoryStateBackend ， 元数据和保存点状态都是保存在 _metadata 文件中的， 因为是一个自包含的文件，可以将文件移动到任意的位置并加载恢复。
 
@@ -211,7 +211,7 @@ MemoryStateBackend  可以配置为异步快照。 为了避免阻塞，强烈�
 ```
 MemoryStateBackend 的限制：
 - 默认单独的状态的大小最大为5M。 可以通过 MemoryStateBackend 的构造函数的增加这个值。
-- 不考虑配置的配置的状态最大大小， 状态大小不能超过 akka的一帧。（参考(Configuration)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html]） 
+- 不考虑配置的配置的状态最大大小， 状态大小不能超过 akka的一帧。[参考Configuration](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html)
 - 合计状态必须能放入 JobManager 内存。
 
 MemoryStateBackend  建议使用场景:
@@ -252,7 +252,9 @@ RocksDBStateBackend 的建议使用场景：
 
 RocksDBStateBackend 是当前唯一一个支持增量检查点的状态后端。
 
-一些RocksDB 特有的度量指标可以使用，但是默认是禁用的，可以参考的(文档)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html#rocksdb-native-metrics]
+一些RocksDB 特有的度量指标可以使用，但是默认是禁用的，可以参考的[文档](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html#rocksdb-native-metrics)
+
+
 
 
 ### 配置状态后端
@@ -282,7 +284,7 @@ env.setStateBackend(new FsStateBackend("hdfs://namenode:40010/flink/checkpoints"
 
 可配置的值是  jobmanager (MemoryStateBackend), filesystem (FsStateBackend), rocksdb (RocksDBStateBackend) 或者状态后端工厂StateBackendFactory实现类的全名， 如 org.apache.flink.contrib.streaming.state.RocksDBStateBackendFactory。
 
-state.checkpoints.dir 定义了存放检查点数据和元数据文件的目录。  (详细可参考)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/checkpoints.html#directory-structure]
+state.checkpoints.dir 定义了存放检查点数据和元数据文件的目录。  [详细可参考](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/checkpoints.html#directory-structure)
 
 
 配置示例：
@@ -295,17 +297,14 @@ state.backend: filesystem
 state.checkpoints.dir: hdfs://namenode:40010/flink/checkpoints
 ```
 
-
 | key | Default | 备注 |
-| --- | --- |
+| --- | --- | --- |
 | state.backend.rocksdb.checkpoint.transfer.thread.num | 1 | 传输文件（上载下载）的线程数 |
 | state.backend.rocksdb.localdir | (none) | RocksDB存放文件的本地文件夹（TaskManager） |
 | state.backend.rocksdb.options-factory | "org.apache.flink.contrib.streaming.state.DefaultConfigurableOptionsFactory" | RocksDB  创建DBOptions  和 ColumnFamilyOptions 的工厂类。  |
-| state.backend.rocksdb.predefined-options | state.backend.rocksdb.predefined-options
-    "DEFAULT" | 预置的 RocksDB DBOptions 和 ColumnFamilyOptions。 当前支持的可选项 DEFAULT, SPINNING_DISK_OPTIMIZED, SPINNING_DISK_OPTIMIZED_HIGH_MEM or FLASH_SSD_OPTIMIZED 。 用户在OptionsFactory  自定义的选项优先于预定义的选项。|
+| state.backend.rocksdb.predefined-options | "DEFAULT" | 预置的 RocksDB DBOptions 和 ColumnFamilyOptions。 当前支持的可选项 DEFAULT, SPINNING_DISK_OPTIMIZED, SPINNING_DISK_OPTIMIZED_HIGH_MEM or FLASH_SSD_OPTIMIZED 。 用户在OptionsFactory  自定义的选项优先于预定义的选项。|
 | state.backend.rocksdb.timer-service.factory | "HEAP" |  HEAP (基于堆内存，默认) or ROCKSDB。 时间服务状态的实现的工厂。  |
 | state.backend.rocksdb.ttl.compaction.filter.enabled | false | 是否启用TTL压缩过滤器来清除状态 |
-
 
 
 # 调整检查点与大状态
@@ -316,7 +315,7 @@ state.checkpoints.dir: hdfs://namenode:40010/flink/checkpoints
 下面先讨论如何在大规模上获得性能良好的检查点。 然后解释一些容量规划的最佳实践。
 
 ## 监控状态和检查点
-监控 检查点最简单的方式是通过UI的检查点页面。 详细参考(检查点监控)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/monitoring/checkpoint_monitoring.html]
+监控 检查点最简单的方式是通过UI的检查点页面。 详细参考[检查点监控](https://ci.apache.org/projects/flink/flink-docs-release-1.8/monitoring/checkpoint_monitoring.html)
 
 在扩展检查点时特别有意思的两个数字：
 - 开始检查点到算子的时间： 这个时间现在是不直接显示的，可以通过下面公式计算：
@@ -337,7 +336,7 @@ StreamExecutionEnvironment.getCheckpointConfig().setMinPauseBetweenCheckpoints(m
 ```
 这个时间段是上次检查点完成后，到下次检查点开始前的最小时间间隔， 可参考下图：
 
-!(checkpoint_tuning)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/fig/checkpoint_tuning.svg]
+![checkpoint_tuning](https://ci.apache.org/projects/flink/flink-docs-release-1.8/fig/checkpoint_tuning.svg)
 
 应用可以配置允许多个检查点同时处理（通过CheckpointConfig）。 对于大状态的应用， 这样做经常会占用过多的资源到检查点的处理中。 当手动触发保存点时， 保存点的处理可能会和检查点并发执行。
 
@@ -346,7 +345,7 @@ StreamExecutionEnvironment.getCheckpointConfig().setMinPauseBetweenCheckpoints(m
 
 Before Flink 1.3, an increased number of network buffers also caused increased checkpointing times since keeping more in-flight data meant that checkpoint barriers got delayed. Since Flink 1.3, the number of network buffers used per outgoing/incoming channel is limited and thus network buffers may be configured without affecting checkpoint times 。 
 
-Flink 1.3之前，网络缓冲区的增加，也会引起检查点处理时间的增加。 因为需要保存更多的即时数据，意味着检查点栅栏被延迟。  Flink 1.3之后，每个输入输出的channel 使用的网络缓冲区是有限的， 因此网络缓冲区可以在不影响检查点时间的情况进行配置。  参考(network buffer configuration)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html#configuring-the-network-buffers].
+Flink 1.3之前，网络缓冲区的增加，也会引起检查点处理时间的增加。 因为需要保存更多的即时数据，意味着检查点栅栏被延迟。  Flink 1.3之后，每个输入输出的channel 使用的网络缓冲区是有限的， 因此网络缓冲区可以在不影响检查点时间的情况进行配置。  参考[network buffer configuration](https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/config.html#configuring-the-network-buffers).
 
 
 ## 尽可能使用异步检查点
@@ -444,7 +443,7 @@ RocksDB 是一个本地库， 从进程直接分配内存，而不是从JVM中�
 ## 容量规划
 下面讨论下如何对Flink的作业进行资源预估，保证作业可靠地运行。 一些基本的经验法则：
 
-- 正常的处理应该有足够的容量以确保不引起持续的背压。 详细可参考(背压监控)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/monitoring/back_pressure.html]
+- 正常的处理应该有足够的容量以确保不引起持续的背压。 详细可参考[背压监控](https://ci.apache.org/projects/flink/flink-docs-release-1.8/monitoring/back_pressure.html)
 - 要在不引起背压的基础上预留一些额外的资源。 额外的资源需要满足在应用故障恢复期间输入数据堆积的需求。 具体需要多少取决于一般的故障恢复时间（故障后TaskManager重新加载状态等）。
     IMPORTANT： 基准是建立在开户检查点的情况上的， 因为检查点也需要占用一部分的资源（网络带宽等）
 -  偶尔出现短暂的背压一般没有什么问题， 在负载峰值、追赶进度或外部系统偶现缓慢的时候，这是一个正常现象。 
@@ -486,7 +485,7 @@ executionConfig.setUseSnapshotCompression(true);
 需要注意的是，要玩选择的状态后端和检查点策略，  为每个检查点生创建并存储本地备份会产生一些额外的代价。 比如， 大多数的实现只是简单地远程和本地分别写入一次。
 
 
-!(local_recovery.png)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/fig/local_recovery.png]
+![local_recovery.png](https://ci.apache.org/projects/flink/flink-docs-release-1.8/fig/local_recovery.png)
 
 ### 状态快照的主（分布式存储）与从（任务本地）的关系
 
@@ -500,7 +499,7 @@ executionConfig.setUseSnapshotCompression(true);
 
 ### 配置任务本地容错
 Task-local recovery is deactivated by default and can be activated through Flink’s configuration with the key state.backend.local-recovery as specified in CheckpointingOptions.LOCAL_RECOVERY. The value for this setting can either be true to enable or false (default) to disable local recovery.
- 
+
  默认情况下任务本地恢复是未开启的。 可以通过将Flink 中**CheckpointingOptions.LOCAL_RECOVERY** 的
 **state.backend.local-recovery** 来开启任务本地恢复， 取值为true/false。
 ```java
@@ -519,6 +518,6 @@ Task-local recovery is deactivated by default and can be activated through Flink
 - FsStateBackend：支持键状态。 通过再次写入到本地文件来实现。 会引入额外的写消耗，并占用本地磁盘空间。 将来，我们可能会提供内存版本的实现。
 - RocksDBStateBackend： 支持键状态。 对于全量快照，，状态重复写入本地文件，会引入额外的写消耗，并占用本地磁盘空间。 对于增量快照， 本地状态是依赖于RocksDB的查检点机制。 报建主存储拷贝也是使用这个机制，意味着创建备份是不会引入额外的消耗。 在将检查点目录上传后，仅是简单地保留下这个目录而不是删除。 本地备份可以和RocksDB共享文件（夹）（硬连接），所以增量快照也不会占用额外的磁盘空间。 使用硬连意味着RocksDB目录必须与配置的存储本地状态的目录在一块物理磁盘上。 否则硬连接会建立失败（FLINK-10954）。 当前，RocksDB 目录配置到了多个物理磁盘上时，是不能使用本地恢复的。 
 
-### 调度的分配保留Allocation-preserving scheduling
+### 保留调度的分配结果
 
 任务本地恢复假定在故障时会保留任务的调度分配。 每个任务会记得他之前分配的槽位，恢复重启时会请求分配到桢的槽位。 如果这个槽位不可用了， 任务会向ResourceManager请求分配一个新的槽位。 通过这种方式， 如果 TaskManager 不可用了， 不能恢复到之前槽位的任务不会挤占别的恢复中的任务的槽位。 因为认为只有TaskManager不可用时，上一个槽位才会消失， 在这种情况下，对应槽位的任务无论如何必须去申请一个新的槽位了。 通过这种高度策略， 可以让最大数量的任务有机会恢复到其对应的之前的槽位上， 从而避免了相互窃取之前槽位而引起的级联效应。
