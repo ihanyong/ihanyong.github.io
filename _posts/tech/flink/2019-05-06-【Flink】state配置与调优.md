@@ -1,4 +1,17 @@
-2019-05-05-FlinkStreamAPI-State
+---
+layout: post
+title:  "2019-05-06-【Flink】state配置与调优"
+date:   2019-05-06 11:00:00 +0800
+tags:
+        - 流处理
+        - Flink
+---
+
+参考
+-  (Checkpoints)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/checkpoints.html]
+-  (Savepoints)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/savepoints.html]
+-  (State Backends)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/state_backends.html]
+-  (Tuning Checkpoints and Large State)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/ops/state/large_state_tuning.html]
 
 # CheckPoint
 
@@ -347,11 +360,6 @@ Flink 1.3之前，网络缓冲区的增加，也会引起检查点处理时间�
 
 
 ## 调整 RocksDB
-The state storage workhorse of many large scale Flink streaming applications is the RocksDB State Backend. The backend scales well beyond main memory and reliably stores large keyed state.
-
-Unfortunately, RocksDB’s performance can vary with configuration, and there is little documentation on how to tune RocksDB properly. For example, the default configuration is tailored towards SSDs and performs suboptimal on spinning disks.
-
-
 许多大型FLink流应用的状态存储后端是RocksDB。 这个状态后端的规模远超主内存，并可靠在存储大规模的keyed 状态。
 
 不幸的是， 对于不同的配置，RocksDB 的性能表现非常不同。 且关于如何正确进行RocksDB配置调优的文档很少。 比如， 默认是配置是针对SSDs的， 对于机械硬盘不是很合适。
@@ -433,14 +441,84 @@ RocksDB 是一个本地库， 从进程直接分配内存，而不是从JVM中�
 
 您分配给rocksdb的任何内存都必须考虑在内，通常是通过将任务管理器的JVM堆大小减少相同的数量。如果不这样做，可能会导致yarn/meos/etc终止用于分配比配置更多内存的JVM进程。
 
- Any memory you assign to RocksDB will have to be accounted for, typically by decreasing the JVM heap size of the TaskManagers by the same amount. Not doing that may result in YARN/Mesos/etc terminating the JVM processes for allocating more memory than configured.
-
 ## 容量规划
+下面讨论下如何对Flink的作业进行资源预估，保证作业可靠地运行。 一些基本的经验法则：
+
+- 正常的处理应该有足够的容量以确保不引起持续的背压。 详细可参考(背压监控)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/monitoring/back_pressure.html]
+- 要在不引起背压的基础上预留一些额外的资源。 额外的资源需要满足在应用故障恢复期间输入数据堆积的需求。 具体需要多少取决于一般的故障恢复时间（故障后TaskManager重新加载状态等）。
+    IMPORTANT： 基准是建立在开户检查点的情况上的， 因为检查点也需要占用一部分的资源（网络带宽等）
+-  偶尔出现短暂的背压一般没有什么问题， 在负载峰值、追赶进度或外部系统偶现缓慢的时候，这是一个正常现象。 
+- 一些特定的算子（如大窗口） 会引起下游算子的峰值： 在窗口构建期间内，下游的算子没有什么需要处理， 当窗口结束触发会出现大的负载。 
+规划中需要将下游算子的并行度考虑在内（同时发送多少窗口， 处理窗口峰值的速度）。
+
+IMPORTANT： 为了后续能够增加资源， 请确保将流处理程序的最大并行度设置为一个合理的值。 最大并行度决定了程序的最高可扩展的容量（通过保存点）。
+
+Flink 内部是以最大并行度的粒度来跟踪键组的并行状态。 Flink的设计是尽量让以最大并行度运行时的效率更高，即使程序是以较小的并行度来运行的。
 
 ## 压缩
+Flink 为所有的查检点和保存点提供了可选的压缩选项（默认关闭）。 当前压缩都是采用的快速压缩算法（1.1.4）， 我们计划在未来支持用户自定义压缩算法。 压缩是以键组为粒度的， 每个键组可以独立的解压， 这对于扩展来说是很重要的一个特性。
+
+
+通过 ExecutionConfig 来开启压缩选项:
+```java
+ExecutionConfig executionConfig = new ExecutionConfig();
+executionConfig.setUseSnapshotCompression(true);
+```
+
+压缩对于增量快照没有影响，因为使用的都是 RocksDB 的快速压缩格式。 
 
 ## 任务本地容错
 
 ### 动机
+对于检查点， 每一个任务都会生成一个状态快照并写入到分布式存储上。 每一个任务会将状态快照在分布式存储上的位置句柄发送给 jobManager。 最后， JobManager收集所任务的状态快照句柄，把它们绑定到查检点对象上。 
+
+当恢复时， JobManager 打开最后一个查检点对象， 并将句柄返回给对应的任务， 任务再从分布式存储上读取回状态快照进行加载。  使用分布式存储有两个好处： 一是分布式存储具有容错能力，二是所有的节点都能访问到并能方便地进行再分布（如扩容）。
+
+但使用远程的分布式存储也有一个缺点： 所有的任务都必须通过网络从远程机器上取回状态。 在许多场景， 恢复时失败的任务会再分配到之前运行的 TaskManager（不是一定的，机器故障时）。 但我们还是去读取远程状态。 状态很大时，这会导致长耗时的恢复时间， 即使只是某一个机器上的小故障。
+
+
 ### 目标
+
+任务本地状态恰好是解决这个恢复耗时问题的， 主要思想是： 对于每一个检查点， 每个任务不仅将任务的状态写入到分布式存储上， 还在任务本地机器上保存一个快照的备份（磁盘或内存）。  需要注意的是，快照的主存储还是分布式存储， 因为本地存储在故障是不保证持久性，且其它节点不能远程访问。 
+
+但是对于恢复时再分配到前一次相同的节点上的任务而言， 可以从本地备份加载状态，不需要远程读取分布式存储上的状态。 大多数的故障都不是节点故障，节点为故障一般也只是影响一个或少数几个节点， 基本上大多数的任务在恢复时还是分配到之前运行的节点上的，这样就就可以在本地读取状态快照。 高效的本地恢复可以显著地减少恢复时间。 
+
+需要注意的是，要玩选择的状态后端和检查点策略，  为每个检查点生创建并存储本地备份会产生一些额外的代价。 比如， 大多数的实现只是简单地远程和本地分别写入一次。
+
+
+!(local_recovery.png)[https://ci.apache.org/projects/flink/flink-docs-release-1.8/fig/local_recovery.png]
+
 ### 状态快照的主（分布式存储）与从（任务本地）的关系
+
+任务本地状态只能被认为是一个从属的备份， 查检点状态的主存储还是在分布式存储。 
+- 对于检查点而言， 主存储的写入必须成功， 写入备份失败不会导致检查点失败。 ，而主存储创建失败时检查点也是失败的，即使备份是成功的。
+- 只有主存储是被JobManage确认并管理的。 从属备份属于TaskManage，其生命周期独立于主存储。如可以在主存储上保留最后3个检查点，任务本地状态最保存最后一个查检点。
+- 恢复时，如果对应的备份可用，Flink会先尝试从本地加载状态。 如果从本地加载有问题， Flink才会再从主存储上恢复任务状态。 只有备份（可选）、主存储都失败时，恢复才会失败。 这时， 根据配置，Flink会尝试从更前面的检查点进行恢复。
+- 任务本地存储可能只有部分不完整的状态（如，写入本地文件时出错）。 这时， Flink会先尝试从本地加载部分状态，本地没有的状态再从主存储上加载。 主存储一定是完整的， 是本地状态的超集。
+- 相比于主存储，本地状态可能有各种不同的格式，不一定是二进制的形式。 如可以是内存中的一个堆对象，而不是存放在文件中。 
+- 如果一个TaskManage丢失了，其对的所有的任务的本地状态也会丢失。
+
+### 配置任务本地容错
+Task-local recovery is deactivated by default and can be activated through Flink’s configuration with the key state.backend.local-recovery as specified in CheckpointingOptions.LOCAL_RECOVERY. The value for this setting can either be true to enable or false (default) to disable local recovery.
+ 
+ 默认情况下任务本地恢复是未开启的。 可以通过将Flink 中**CheckpointingOptions.LOCAL_RECOVERY** 的
+**state.backend.local-recovery** 来开启任务本地恢复， 取值为true/false。
+```java
+    public static final ConfigOption<Boolean> LOCAL_RECOVERY = ConfigOptions
+            .key("state.backend.local-recovery")
+            .defaultValue(false)
+            .withDescription("This option configures local recovery for this state backend. By default, local recovery is " +
+                "deactivated. Local recovery currently only covers keyed state backends. Currently, MemoryStateBackend does " +
+                "not support local recovery and ignore this option.");
+```
+
+### 不同的状态后端下任务容错的细节
+限制： 当前，任务本地恢复只覆盖了键状态后端。  当前状态大部分都是键状态。 不久，我们也会覆盖算子状态和定时器。
+
+下面的状态后端可以支持任务本地恢复：
+- FsStateBackend：支持键状态。 通过再次写入到本地文件来实现。 会引入额外的写消耗，并占用本地磁盘空间。 将来，我们可能会提供内存版本的实现。
+- RocksDBStateBackend： 支持键状态。 对于全量快照，，状态重复写入本地文件，会引入额外的写消耗，并占用本地磁盘空间。 对于增量快照， 本地状态是依赖于RocksDB的查检点机制。 报建主存储拷贝也是使用这个机制，意味着创建备份是不会引入额外的消耗。 在将检查点目录上传后，仅是简单地保留下这个目录而不是删除。 本地备份可以和RocksDB共享文件（夹）（硬连接），所以增量快照也不会占用额外的磁盘空间。 使用硬连意味着RocksDB目录必须与配置的存储本地状态的目录在一块物理磁盘上。 否则硬连接会建立失败（FLINK-10954）。 当前，RocksDB 目录配置到了多个物理磁盘上时，是不能使用本地恢复的。 
+
+### 调度的分配保留Allocation-preserving scheduling
+
+任务本地恢复假定在故障时会保留任务的调度分配。 每个任务会记得他之前分配的槽位，恢复重启时会请求分配到桢的槽位。 如果这个槽位不可用了， 任务会向ResourceManager请求分配一个新的槽位。 通过这种方式， 如果 TaskManager 不可用了， 不能恢复到之前槽位的任务不会挤占别的恢复中的任务的槽位。 因为认为只有TaskManager不可用时，上一个槽位才会消失， 在这种情况下，对应槽位的任务无论如何必须去申请一个新的槽位了。 通过这种高度策略， 可以让最大数量的任务有机会恢复到其对应的之前的槽位上， 从而避免了相互窃取之前槽位而引起的级联效应。
