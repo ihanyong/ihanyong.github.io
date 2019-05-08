@@ -20,12 +20,111 @@ tags:
 
 ### ChannelInboundInvoker & ChannelOutboundInvoker
 
-ChannelInboundInvoker 定义了所有的的入站方法，如下图所示
-![ChannelInboundInvoker methods](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/channeinboundInvoker.png)
+ChannelInboundInvoker 定义了所有的的入站方法，如下所示
 
+```java
+public interface ChannelInboundInvoker {
 
-ChannelOutboundInvoker 定义了所有的出站方法，如下力所示
-![ChannelOutboundInvoker methods](https://raw.githubusercontent.com/ihanyong/ihanyong.github.io/master/_posts/tech/netty/imgs/ChannelOutboundInvoker.png)
+    /**
+     * A {@link Channel} was registered to its {@link EventLoop}.
+     */
+    ChannelInboundInvoker fireChannelRegistered();
+
+    /**
+     * A {@link Channel} was unregistered from its {@link EventLoop}.
+     */
+    ChannelInboundInvoker fireChannelUnregistered();
+
+    /**
+     * A {@link Channel} is active now, which means it is connected.
+     */
+    ChannelInboundInvoker fireChannelActive();
+
+    /**
+     * A {@link Channel} is inactive now, which means it is closed.
+     */
+    ChannelInboundInvoker fireChannelInactive();
+
+    /**
+     * A {@link Channel} received an {@link Throwable} in one of its inbound operations.
+     */
+    ChannelInboundInvoker fireExceptionCaught(Throwable cause);
+
+    /**
+     * A {@link Channel} received an user defined event.
+     */
+    ChannelInboundInvoker fireUserEventTriggered(Object event);
+
+    /**
+     * A {@link Channel} received a message.
+     */
+    ChannelInboundInvoker fireChannelRead(Object msg);
+
+    /**
+     * Triggers an {@link ChannelInboundHandler#channelReadComplete(ChannelHandlerContext)}
+     */
+    ChannelInboundInvoker fireChannelReadComplete();
+
+    /**
+     * Triggers an {@link ChannelInboundHandler#channelWritabilityChanged(ChannelHandlerContext)}
+     */
+    ChannelInboundInvoker fireChannelWritabilityChanged();
+}
+```
+
+ChannelOutboundInvoker 定义了所有的出站方法，如下所示
+```java
+
+public interface ChannelOutboundInvoker {
+
+    ChannelFuture bind(SocketAddress localAddress);
+
+    ChannelFuture connect(SocketAddress remoteAddress);
+
+    ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress);
+
+    ChannelFuture disconnect();
+
+    ChannelFuture close();
+
+    ChannelFuture deregister();
+
+    ChannelFuture bind(SocketAddress localAddress, ChannelPromise promise);
+
+    ChannelFuture connect(SocketAddress remoteAddress, ChannelPromise promise);
+
+    ChannelFuture connect(SocketAddress remoteAddress, SocketAddress localAddress, ChannelPromise promise);
+
+    ChannelFuture disconnect(ChannelPromise promise);
+
+    ChannelFuture close(ChannelPromise promise);
+
+    ChannelFuture deregister(ChannelPromise promise);
+
+    ChannelOutboundInvoker read();
+
+    ChannelFuture write(Object msg);
+
+    ChannelFuture write(Object msg, ChannelPromise promise);
+
+    ChannelOutboundInvoker flush();
+
+    ChannelFuture writeAndFlush(Object msg, ChannelPromise promise);
+
+    ChannelFuture writeAndFlush(Object msg);
+
+    ChannelPromise newPromise();
+
+    ChannelProgressivePromise newProgressivePromise();
+
+    ChannelFuture newSucceededFuture();
+
+    ChannelFuture newFailedFuture(Throwable cause);
+
+    ChannelPromise voidPromise();
+}
+
+```
 
 - ChannelPipeline 与 ChannelHandlerContext 都继承了ChannelInboundInvoker和ChannelOutboundInvoker，
 
