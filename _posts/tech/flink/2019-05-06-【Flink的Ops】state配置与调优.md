@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "2019-05-06-【Flink】state配置与调优"
+title:  "2019-05-06-【Flink的Ops】state配置与调优"
 date:   2019-05-06 11:00:00 +0800
 tags:
         - 流处理
