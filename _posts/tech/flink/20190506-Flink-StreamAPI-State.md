@@ -741,10 +741,369 @@ Flink 现在只为非迭代的作业提供处理保证。 在迭代作业上启�
 
 Flink 支持不同的重启策略来控制在故障时作业如何重启， 详细参考[重启策略](https://ci.apache.org/projects/flink/flink-docs-release-1.8/dev/restart_strategies.html)。
 
-
 # 可查询的状态
+【TODO】
 # 状态后端
-
+参考 【2019-05-06-【Flink】state配置与调优】
 
 # 演进更新状态模式
-# 自定义状态的序列化
+一般Flink的流应用程序都是面向长期执行设计的。 和其它长期的服务一样， 当需要变更的时候，应用程序也需要被更新。 应用程序使用数据模式也是一样的，它们随着应用不断演进的。 
+
+
+这里讨论如查对数据模式进行演进。 当前各种数据类型和状态结构存在着各种各样的限制(ValueState, ListState, etc.)。 
+
+这里的讨论使用Flink 的[type serialization framework](https://ci.apache.org/projects/flink/flink-docs-release-1.8/dev/types_serialization.html) 情况。 
+也就是说声明状态时提供的 descriptor不能配置TypeSerializer 或者 TypeInformation（flink 自己推测状态类型）：
+
+```java
+ListStateDescriptor<MyPojoType> descriptor =
+    new ListStateDescriptor<>(
+        "state-name",
+        MyPojoType.class);
+
+checkpointedState = getRuntimeContext().getListState(descriptor);
+```
+
+本质上，能否进行状态模式的演进，取决于读写持久化状态的序列化器。  简单地说， 注册的状态模式只有在它的序列化器能够支持的情况下才能进行演进。 这是由Flink的序列化框架生成的序列化器透明化的处理的。
+
+如果要实现自定义的 TypeSerializer，就需要学习如何实现支持状态模式的演进。 请参考[][Custom State Serialization](https://ci.apache.org/projects/flink/flink-docs-release-1.8/dev/stream/state/custom_serialization.html)。  
+
+## 演进状态模式
+
+To evolve the schema of a given state type, you would take the following steps:
+为了演进给定的状态类型的模式， 需要如下步骤：
+1. 生成Flink作业的保存点
+2. 更新应用程序中的状态类型（如修改 Avro type schema）
+3. 从保存点再加载作业。 当第一次访问状态时， Flink 会评估状态的模式是否发生改变， 如果有必须就会进行状态的迁移。
+
+状态的模式变更时状态迁移处理是自动进行的， 每一个状态间的处理是独立的。 如果使用了新的序列化器Flink 首先会检查状态的的序列化模式是否变更， 如果变了， 变会使用前一个序列化器把状态读取出来， 并用新的序列化器把状态写回去。 
+
+更多关于状态迁移的处理请参考 [自定义序列化器](https://ci.apache.org/projects/flink/flink-docs-release-1.8/dev/stream/state/custom_serialization.html).
+
+
+
+## 支持模式演进的数据类型
+当前只有POJO 和 Avro types支持模式的演进。 也就是说如果需要进行数据模式的演进，建议使用数据类型使用Pojo 或 Avro。
+
+计划会扩展支持更多的复杂数据类型，详细参考 [FLINK-10896](https://issues.apache.org/jira/browse/FLINK-10896).
+
+
+### POJO types
+[POJO types](https://ci.apache.org/projects/flink/flink-docs-release-1.8/dev/types_serialization.html#rules-for-pojo-types) 支持模式演进的一些规则:
+
+1. 可以删除字段。 删除后字段的值在之后的检查点和保存点中会被丢弃。 
+2. 可以增加字段。新字段的初始值是对应Java类型的默认值。
+3. 字段的类型不能修改。
+4. POJO的类名不能修改，包括所属的包名。
+
+只有 1.8.0 版本之后的保存点支持 POJO 类型状态的模式迁移， 1.8.0之前的不行。
+
+### Avro types
+只要是兼容[Avro’s rules for schema resolution](http://avro.apache.org/docs/current/spec.html#Schema+Resolution) 的, Flink 完全地支持 Avro 类型状态的模式演进.
+
+作业重启时有一个限制就是 作为状态类型使用的Avro生成类不能迁移或变更命名空间。
+
+
+# 自定义状态序列化
+下面讨论一下如何实现自定义的状态序列化器， 及允许模式演进的一些最佳实践经验。
+
+## Using custom state serializers
+注册托管状态时， 需要一个StateDescriptor来指定状态名称和状态数据类型的信息。  类型信息是用于Flink的类型序列化框架创建对应的状态序列化器的。 
+
+完全可以使用自定义的序列化器来序列化托管状态， 只需直接在实例化 StateDescriptor 时使用自己的TypeSerializer 实现：
+```java
+public class CustomTypeSerializer extends TypeSerializer<Tuple2<String, Integer>> {...};
+
+ListStateDescriptor<Tuple2<String, Integer>> descriptor =
+    new ListStateDescriptor<>(
+        "state-name",
+        new CustomTypeSerializer());
+
+checkpointedState = getRuntimeContext().getListState(descriptor);
+```
+
+## State serializers and schema evlution
+当从保存点重新加载时， Flink允许修改序列化器来读写之前注册的， 这样用户就不必被绑定在特定的模式序列化方式上。 当重新加载状态时， 会注册一个新的序列化器。 新的注册的序列化器可以与前一个的模式不一样。 这样当实现的序列化器时，除了基本的读写数据的逻辑外，要考虑要以后可能会修改模式的序列的方式。 
+
+这里说的模式， 在本文可以在状态类型的数据模型与状态类型的序列化的二进制格式的意思之间互换。 一般来说模式会发生下面一些改变：
+1. 状态的数据类型发生了演变， 如从用于状态的POJO中增加或移除了字段。
+2. 数据模式改变后， 序列化器的序列化格式也需要升级
+3. 配置的序列化器发生改变
+
+为了在运行时知道所写的状态模式的信息及模式是否发生了变化， 在生成算子状态的保存点时， 也需要包含状态序列化器的快照。  这就是TypeSerializerSnapshot 抽象。
+
+
+
+### The TypeSerializerSnapshot abstraction
+```java
+
+
+public interface TypeSerializerSnapshot<T> {
+    int getCurrentVersion();
+    void writeSnapshot(DataOuputView out) throws IOException;
+    void readSnapshot(int readVersion, DataInputView in, ClassLoader userCodeClassLoader) throws IOException;
+    TypeSerializerSchemaCompatibility<T> resolveSchemaCompatibility(TypeSerializer<T> newSerializer);
+    TypeSerializer<T> restoreSerializer();
+}
+
+```
+
+
+```java
+public abstract class TypeSerializer<T> {
+    // ...
+    public abstract TypeSerializerSnapshot<T> snapshotConfiguration();
+}
+
+
+```
+
+TypeSerializerSnapshot 是一个时间点上的信息，作为状态序列化器写入模式的单一信息源， 和还原给定时间点上的序列化器所需的必要信息。  序列化器快照的写入和还原读取逻辑定义在writeSnapshot 和 readSnapshot 方法。
+
+快照自己的写入模式也可能需要随着时间而更改（如希望向快照添加增多关于序列器的信息时）。 为了实现这一点， 快照是有版本的， 通过getCurrentVersion 方法来定义当前版本。 在还原时， 序列化器快照是从保存点读取的， 快照中的模式版本会被提供给  readSnapshot 方法，这样读取逻辑就可以处理不同的版本了。 
+
+
+序列化程序的typeserializersnapshot是一个时间点信息，它充当有关状态序列化程序写入架构的单一信息源，以及还原与给定时间点相同的序列化程序所必需的任何其他信息。在writeSnapshot和readSnapshot方法中定义了序列化程序快照还原时应写入和读取的内容的逻辑。
+
+
+请注意，快照自己的写入模式也可能需要随着时间的推移而更改（例如，当您希望向快照添加有关序列化程序的更多信息时）。为了便于实现这一点，快照的版本是通过getcurrentversion方法中定义的当前版本号进行的。在还原时，当从保存点读取序列化程序快照时，将向read snapshot方法提供写入快照的架构的版本，以便read实现可以处理不同的版本。
+
+还原时， 检测模式是否变更的逻辑应该在 resolveSchemaCompatibility 方法中实现。 当之前注册过的状态再次以新序列化器注册时， 通过这个方法将新的序列化器提供给之前的序列化器快照， 并返回 兼容性结果 TypeSerializerSchemaCompatibility： 
+
+1. TypeSerializerSchemaCompatibility.compatibleAsIs(): 兼容，新旧序列化器的模式是一样的。
+2. TypeSerializerSchemaCompatibility.compatibleAfterMigration():  模式不一样，但可以通过使用老的序列化器读取状态，再通过新的序列化器写入的方式进行迁移。 
+3. TypeSerializerSchemaCompatibility.incompatible(): 不兼容，旧状态也不能迁移
+
+TypeSerializerSnapshot 另外一个角色作为还原旧序列化器的工厂方法。 具体的说TypeSerializerSnapshot 应该实现restoreSerializer 方法来实例化能识别旧模式和配置的序列化器的实例， 这样就可以安全地读取出旧序列化器写入的数据。 
+
+
+### How Flink interacts with the TypeSerializer and Type SerializerSnapshot abstractions
+
+#### 非堆内存的状态后端 (e.g. RocksDBStateBackend)
+
+1. 使用具有模式A的序列化器注册一个新状态
+    - 每次方法状态都是使用注册的TypeSerializer来读写状态
+    - 状态是以模式A写入的
+2. 生成保存点
+    - 序列化器的快照是通过TypeSerializer#snapshotConfiguration来抽取的
+    - 序列化器的快照与序列化过的状态数据（模式A）一起写入保存点
+3. 使用具有模式B的序列化器还原状态数据
+    - 还原之前的序列化器的快照
+    - 还原时状态的字节数据不进行反序列化，只是加载加状态后端（还是模式A的形式）
+    - 接收到新的序列化器时， 通过TypeSerializer#resolveSchemaCompatibility方法提供给还原出来的旧序列化器检查模式的兼容性
+4. 在后端将状态数据从模式A迁移到模式B
+    - 如果结果是模式发生了改变且可迁移， 则进行模式和迁移。  从之前的序列化器快照还原能识别模式A的旧序列化器，并用来将状态字节数据反序列化为对象， 然后使用能识别模式B的新序列化器再写入状态， 以完成迁移工作。 在继续处理前所有访问的状态都要一起迁移。
+    - 如果是不兼容，由状态访问失败抛出异常。
+
+#### 堆内存的状态后端 (e.g. MemoryStateBackend, FsStateBackend)
+
+
+1. 使用具有模式A的序列化器注册一个新状态
+    - 注册的TypeSerializer由状态后端维护
+2.  以模式A将所有的状态生成保存点
+    - 通过TypeSerializer#snapshotConfiguration来抽取序列化器的快照
+    - 序列化器的快照写入保存点
+    - 以模式A将状态对象序列化进保存点
+3. 还原时，在堆内存中将状态反序列化为对象
+    - 还原之前的序列化器的快照
+    - 通过TypeSerializerSnapshot#restoreSerializer()方法从序列化器快照还原能识别模式A的旧序列化器， 并将状态字节数据反序列化为对象
+    - 到此，所有的状态已经被反序列化
+4. 使用具有模式B的序列化器还原状态
+    - 接收到新的序列化器时， 通过TypeSerializer#resolveSchemaCompatibility方法提供给还原出来的旧序列化器检查模式的兼容性
+    - 如果结果是需要迁移，对于基于堆内存的状态后端，什么也不用做， 所有的状态已经反序列化为了对象。
+    - 如果是不兼容，由状态访问失败抛出异常。
+5. 使用模式B将所有的状态生成一个新的保存点
+    - 与步骤2一样，只是模式是B
+
+
+## 预置的 TypeSerializerSnapshot 类
+对于常见的场景Flink为TypeSerializerSnapshot提供了两个基本的抽象类: SimpleTypeSerializerSnapshot 和 CompositeTypeSerializerSnapshot。
+
+使用预置快照作为快照的的序列化器必须要有自己的独立的快照子类实现。 不同的序列化器之间不要共享快照类。 
+
+
+
+### 实现一个 SimpleTypeSerializerSnapshot
+SimpleTypeSerializerSnapshot 适用于没有任何状态或配置的序列化器， 也主就是说序列化模式由序列化器类自己单独定义。 
+
+使用SimpleTypeSerializerSnapshot的序列化器兼容性检查结果只能是下面两个： 
+
+    - TypeSerializerSchemaCompatibility.compatibleAsIs()：新的 serializer 类与之前的一样
+    - TypeSerializerSchemaCompatibility.incompatible()：新的 serializer 类与之前的不同
+
+SimpleTypeSerializerSnapshot 示例：
+
+```java
+public class IntSerializerSnapshot extends SimpleTypeSerializerSnapshot<Integer> {
+    public IntSerializerSnapshot() {
+        super(() -> IntSerializer.INSTANCE);
+    }
+}
+```
+
+
+IntSerializer 没有状态和配置， 序列化模式由IntSerializer类自己定义，也只能由另外一个IntSerializer 来读取。 这可以使用SimpleTypeSerializerSnapshot。
+
+SimpleTypeSerializerSnapshot 的父构造方法需要提供一个对应序列化器实例的提供者， 不管是还原还是写入快照的时候。 这个实例提供才用来创建还原序列化器， 并作序列化器类型检查。
+
+
+simpletypeserializersnapshot的基本超级构造函数需要提供相应序列化程序的实例，而不管快照当前是正在还原还是在快照期间写入。该供应商用于创建还原序列化程序，并进行类型检查以验证新序列化程序是否属于相同的预期序列化程序类。
+
+### 实现一个 CompositeTypeSerializerSnapshot
+CompositeTypeSerializerSnapshot 是用于有多个内嵌序列化器组成的复合序列化器的。 
+
+这里将由多个内嵌序列化器叫做外层序列化器。 像  MapSerializer, ListSerializer, GenericArraySerializer 等， 以MapSerializer为例，  key 和 value 和序列化器就是内嵌的， MapSerializer 就是外层层序列化器。
+
+在这个例子中， 外层序列化器的快照也要包含内嵌序列化器的快照， 这样内嵌序列化器的兼容性可以单独校验。 当校验外层序列化器的兼容性的时候，也需要考虑内嵌序列化器。 
+
+
+CompositeTypeSerializerSnapshot 是为了帮助实现组合序列化器的快照。 处理内嵌序列化器快照的读写， 并模拟所有的内嵌序列化器的兼容性来推断最终的兼容性。 
+
+下面以 MapSerializer 为例，演示CompositeTypeSerializerSnapshot 的使用：
+
+```java
+
+
+public class MapSerializerSnapshot<K, V> extends CompositeTypeSerializerSnapshot<Map<K, V>, MapSerializer> {
+
+    private static final int CURRENT_VERSION = 1;
+
+    public MapSerializerSnapshot() {
+        super(MapSerializer.class);
+    }
+
+    public MapSerializerSnapshot(MapSerializer<K, V> mapSerializer) {
+        super(mapSerializer);
+    }
+
+    @Override
+    public int getCurrentOuterSnapshotVersion() {
+        return CURRENT_VERSION;
+    }
+
+    @Override
+    protected MapSerializer createOuterSerializerWithNestedSerializers(TypeSerializer<?>[] nestedSerializers) {
+        TypeSerializer<K> keySerializer = (TypeSerializer<K>) nestedSerializers[0];
+        TypeSerializer<V> valueSerializer = (TypeSerializer<V>) nestedSerializers[1];
+        return new MapSerializer<>(keySerializer, valueSerializer);
+    }
+
+    @Override
+    protected TypeSerializer<?>[] getNestedSerializers(MapSerializer outerSerializer) {
+        return new TypeSerializer<?>[] { outerSerializer.getKeySerializer(), outerSerializer.getValueSerializer() };
+    }
+}
+
+```
+实现 CompositeTypeSerializerSnapshot 时，下面三个方法必须实现：
+
+    - #getCurrentOuterSnapshotVersion(): 外层序列化器快照的版本号
+    - #getNestedSerializers(TypeSerializer): 传入外层序列化器实例，返回内嵌序列化器s
+    - #createOuterSerializerWithNestedSerializers(TypeSerializer[]): 传入一组内嵌序列化器，返回一个外层序列化器
+
+上面的 CompositeTypeSerializerSnapshot  除了内嵌的serializers快照之外不需要快照其它的信息。 因此外层快照的版本不需要提升。 有一些serializers， 还需要在保存内嵌快照的同时快照一些额外的配置信息。 如 GenericArraySerializer ，除了的内嵌元素serializer 需要包含一个数组元素类型的配置信息。
+
+
+In these cases, an additional three methods need to be implemented on the CompositeTypeSerializerSnapshot:
+
+在这种情况下， 还需要在CompositeTypeSerializerSnapshot中实现三个方法：
+
+    - #writeOuterSnapshot(DataOutputView): 定义如何写入外层快照信息
+    - #readOuterSnapshot(int, DataInputView, ClassLoader):定义如何读取外层快照信息
+    - #isOuterSnapshotCompatible(TypeSerializer): 校验快照信息是否一致（兼容）
+
+默认情况下 CompositeTypeSerializerSnapshot 假设没有任务外层快照信息需要读写， 所以上面三个方法都有一个空的默认实现。  如果子类有外层快照信息的情况下，需要实现这三个方法。
+
+如下所示：
+
+```java
+
+
+public final class GenericArraySerializerSnapshot<C> extends CompositeTypeSerializerSnapshot<C[], GenericArraySerializer> {
+
+    private static final int CURRENT_VERSION = 1;
+
+    private Class<C> componentClass;
+
+    public GenericArraySerializerSnapshot() {
+        super(GenericArraySerializer.class);
+    }
+
+    public GenericArraySerializerSnapshot(GenericArraySerializer<C> genericArraySerializer) {
+        super(genericArraySerializer);
+        this.componentClass = genericArraySerializer.getComponentClass();
+    }
+
+    @Override
+    protected int getCurrentOuterSnapshotVersion() {
+        return CURRENT_VERSION;
+    }
+
+    @Override
+    protected void writeOuterSnapshot(DataOutputView out) throws IOException {
+        out.writeUTF(componentClass.getName());
+    }
+
+    @Override
+    protected void readOuterSnapshot(int readOuterSnapshotVersion, DataInputView in, ClassLoader userCodeClassLoader) throws IOException {
+        this.componentClass = InstantiationUtil.resolveClassByName(in, userCodeClassLoader);
+    }
+
+    @Override
+    protected boolean isOuterSnapshotCompatible(GenericArraySerializer newSerializer) {
+        return this.componentClass == newSerializer.getComponentClass();
+    }
+
+    @Override
+    protected GenericArraySerializer createOuterSerializerWithNestedSerializers(TypeSerializer<?>[] nestedSerializers) {
+        TypeSerializer<C> componentSerializer = (TypeSerializer<C>) nestedSerializers[0];
+        return new GenericArraySerializer<>(componentClass, componentSerializer);
+    }
+
+    @Override
+    protected TypeSerializer<?>[] getNestedSerializers(GenericArraySerializer outerSerializer) {
+        return new TypeSerializer<?>[] { outerSerializer.getComponentSerializer() };
+    }
+}
+
+
+```
+
+有关于上面的代码片段，有两点需要注意：
+一、 因为这个CompositeTypeSerializerSnapshot实现有外层快照信息需要写入快照中， 在外层快照信息发生变化时，外层快照的版本号是必须要相应地变化提。
+二、 注意这里是如何避免Java原生的序列化的。  避免使用Java原生的序列化机制是一个好的实践方式。
+
+## 实现小贴示与最佳实践
+1. Flink 通过使用它们的类名实例化来还原序列化器快照 
+
+序列化器快照 作为保存点中读取状态的切入点，是获取状态如何序列化的单一信息源。 为了能够还原并访问原状态， 原状态序列化器的快照必须要能还原。
+
+Flink冼通过使用来实例化 TypeSerializerSnapshot 来还原序列化器快照。  因此，为了避免未知的类名变化和实例化失败， TypeSerializerSnapshot 类应该： 
+    - 避免实现为匿名类或嵌套类
+    - 要有一个公共无参的构造方法
+
+
+2. 避免在不同的序列化器中使用同一个TypeSerializerSnapshot 类
+模式的兼容性检查是通过序列化器快照进行的， 如果多个不同的序列化器使用同一个TypeSerializerSnapshot类的话，会使 TypeSerializerSnapshot#resolveSchemaCompatibility and TypeSerializerSnapshot#restoreSerializer() 方法的实现变得复杂化。
+
+这也是一个好的隔离方式， 一个序列化器的模式，配置，及如何恢复等应该是封装到一个的专有的TypeSerializerSnapshot类中
+
+
+3. 快照内容中避免使用Java原生序列化方式
+持久化的序列化器快照中应该完全不能使用Java原生的序列化框架。 比如， 一个序列化器需要化上柜类型的类作为快照的一部分， 应该将类名作为持久化快照的一部分，而不是直接通过Java将类对象进行序列化。 当从快照中读取时，取得类名，并通过类名动态地加载类。 
+
+这样可以确保始终能安全地读取序列化器快照。在上面的示例中，如果类是使用Java序列化来持久化的，一旦类实现已经改变，并且根据Java序列化的实现二进制内容不再是兼容的，快照可能不再可读。
+
+### 从Flink1.7之前的废弃的序列化快照APIs迁移
+本节是从Flink 1.7之前存在的序列化器和序列化器快照API迁移的指南。
+
+在Flink 1.7之前，序列化程序快照被实现为TypeSerializerConfigSnapshot（现在已弃用，并将在将来被删除，以完全替换为新的TypeSerializerSnapshot接口）。此外，序列化器模式兼容性检查的职责存在于typeserializer中，在TypeSerializer#ensureCompatibility(TypeSerializerConfigSnapshot)方法中实现。
+
+新抽象和旧抽象的另一个主要区别是，弃用的TypeSerializerConfigSnapshot没有实例化前一个序列化器的能力。因此，在您的序列化器仍然返回TypeSerializerConfigSnapshot的子类作为快照时，序列化器实例本身会始终使用Java序列化来写入保存点，以便在恢复时可以使用先前的序列化器。这是非常不可取的，因为恢复作业是否成功容易受前一个序列化器类的可用性的影响，或者说，是否可以使用Java序列化在还原时读回序列化器实例。这意味着对于状态，只能使用同一个序列化器，一旦想要升级序列化程序类或模式迁移，可能会出现问题。
+
+
+为了避免接口过时，并且能够灵活地迁移状态序列化器和模式，强烈建议从旧的抽象API中迁移。操作步骤如下：
+1. 实现新的TypeSerializerSnapshot子类
+2. 在 TypeSerializer#snapshotConfiguration() 方法中返回 这个TypeSerializerSnapshot
+3. 从存在的Flink 1.7之前的保存点还原作业，并再次生成保存点。 这一步中序列化器的旧的TypeSerializerConfigSnapshot 和TypeSerializer#ensureCompatibility(TypeSerializerConfigSnapshot) 不能删除。 这个处理的目的是用新版本的TypeSerializerSnapshot实现写入的保存点替换旧版本的保存点。
+4.  获取了Flink1.7的保存点后， 就可以安全地将旧的API相关的实现移除了。 (移除旧的 TypeSerializerConfigSnapshot 实现 和序列化器的TypeSerializer#ensureCompatibility(TypeSerializerConfigSnapshot))
