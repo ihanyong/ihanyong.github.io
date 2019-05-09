@@ -1,0 +1,55 @@
+@startuml
+title: AQS独占模式获取acquire
+start
+:tryAcquire;
+note:直接尝试获取资源
+if (成功) then (no)
+    :addWaiter;
+    note: 将当前线程加入等待队列
+    if (成功) then (yes)
+        :acquireQueued;
+        note:在队列中排队获取资源
+    endif
+else(yes)
+endif
+
+
+
+
+stop
+@enduml
+
+@startuml
+title: AQS独占模式获取acquireQueued
+start
+while(true)
+if(prev is head && tryAcquire) then(yes)
+    :将head指向当前节点;
+    stop
+else(no)
+    if(shouldParkAfterFailedAcquire(判断是否可以进入休眠)) then(yes)
+
+        : parkAndCheckInterrupt;
+        note: 挂起线程，等待唤醒
+    endif
+endif
+
+
+endwhile(exception)
+:cancelAcquire;
+stop
+
+@enduml
+
+@startuml
+title: AQS独占模式释放release
+start
+:tryRelease 释放资源;
+if(是否完全释放) then(yes)
+    :unparkSuccessor 唤醒后续节点线程;
+    :return true;
+    stop
+endif
+:return false;
+stop
+@enduml

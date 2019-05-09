@@ -1,5 +1,11 @@
-AQS
-
+---
+layout: post
+title:  "【todo】【Java基础知识梳理】AQS源码阅读分析"
+date:   2019-05-09 12:30:00 +0800
+tags:
+        - 技术
+        - java
+---
 说到并发， 不能不深入了解一下 AbstractQueuedSynchronizer （AQS）。
 ReentrantLock， ReentrantReadWriteLock， Semaphore，CountDownLatch 都是基于AQS实现的。 
 其核心是基于一个先进先出(FIFO)的等待队列和一个表示状态的支持原子操作的整数值。 子类需要实现几个方法来改变这个状态，来表达资源的占用和释放。
@@ -7,10 +13,15 @@ ReentrantLock， ReentrantReadWriteLock， Semaphore，CountDownLatch 都是基�
 
 # 代码框架
 ## AQS类的组成
+AQS的主要组件是 一个volatile int 类型的 state, 和一个Node的双向链表。
 
-AbstractQueuedSynchronizer 定义了一个 **volatile int state** 来表示资源。 state 只能通过 getState() setState(int) compareAndSetState(expect, update)来进行原子性的访问。
-在自定义同步器中只需要实现下面几个方法，使用上面state的gettersetter方法来实现资源的获取与释放。， 
+### State
+AbstractQueuedSynchronizer 定义了一个 **volatile int state** 来表示资源。 在不同的实现中对state的定义可能不一样，比如 ReentrantLock中，用state为0来判断锁是否被占用， 如果为0说明没有线程占用锁。 state 只能通过下面三个方法来进行访问：
+- getState()： 获取当前state的值
+- setState(int)： 直接设置state值， 一般在能保证没有线程并发修改的情况下可以使用这个方法
+- compareAndSetState(expect, update)： CAS的方式修改State, 一般用于多个线程并发获取资源时使用
 
+在自定义同步器中只需要实现下面几个方法，使用上面三个state访问方法来实现资源的获取与释放。 对资源的占用分为两种模式：
 独占模式
 - tryAcquire(int)： 尝试以独占的方式获取资源。 如果获取失败，调用方可以将当前线程推入资源等待队列，直到其它线程释放资源时通知这个线程。
 - tryRelease(int)： tryAcquire的反向操作。 返回一个boolean, true表示已经完全释放了占用的资源，其它等待线程可以尝试获取资源；如果为false，表示还没有将资源完全释放。
@@ -22,13 +33,62 @@ AbstractQueuedSynchronizer 定义了一个 **volatile int state** 来表示资�
 其它
 - isHeldExclusively(): 判断资源是否被当前线程独占。只在 condition中使用。　如果不使用condition就不需要实现这个方法。
 
+以 ReentrantLock 中的非公平锁的实现为例:
+```java
+        protected final boolean tryAcquire(int acquires) {
+            return nonfairTryAcquire(acquires);
+        }
+        final boolean nonfairTryAcquire(int acquires) {
+            final Thread current = Thread.currentThread();
+            int c = getState(); // 获取当前资源状态
+            // 如果为0，没有其它线程占用资源（锁）
+            if (c == 0) { 
+                 // 有过CAS的方式占用资源（获取锁）
+                if (compareAndSetState(0, acquires)) {
+                    setExclusiveOwnerThread(current);
+                    return true;
+                }
+            }
+            // 如果已经资源已经被占用，判断是不是当前线程占用的（可重入锁）
+            else if (current == getExclusiveOwnerThread()) {
+                int nextc = c + acquires;
+                if (nextc < 0) // overflow
+                    throw new Error("Maximum lock count exceeded");
+                // 如果是当前线程占用的锁，可直接使用setState方式来更新state(获取锁的次数)
+                // 注意，state 的数值是多少，之后就要release 多少次，state为0时才算是锁被当前线程释放
+                setState(nextc);
+                return true;
+            }
+            return false;
+        }
 
-AbstractQueuedSynchronizer 维护了一个是一个双向链表队列。节点是 内部类 Node 来定义的。
+        protected final boolean tryRelease(int releases) {
+            int c = getState() - releases;
+            if (Thread.currentThread() != getExclusiveOwnerThread())
+                throw new IllegalMonitorStateException();
+            boolean free = false;
+            if (c == 0) {
+                free = true;
+                setExclusiveOwnerThread(null);
+            }
+            setState(c);
+            return free;
+        }
+```
 
+### Node
+AbstractQueuedSynchronizer 维护了一个是一个双向链表队列。节点是内部类 Node 来定义的。
+AbstractQueuedSynchronizer 中保存了对链表的 head tail 引用。
 
-
-## Node
 等待队列是"CLH" (Craig, Landin, and Hagersten)的一个变种。 CLH 一般用于自旋锁。 
+
+Node 中的主要属性为：
+- volatile int waitStatus： 这个值在使用时一般只需要确定它的范围值。负数值表示节点不需要通知，所以多数代码不需要去判断这个值的精确值。对于同步节点初始值是0，conditio节点是 CONDITION(-2)。使用CAS的方式来修改。取值范围是：[CANCELLED(1),SIGNAL(-1),CONDITION(-2),PROPAGATE(-3),0]
+- volatile Node prev： 指向前一个节点
+- volatile Node next： 指向下一个节点。  为null时当前节点不一定为tail。 所以当next为null时，可能需要从tail向前遍历。 为了便于isOnSyncQueue处理，取消节点的next会指向自己。
+- volatile Thread thread： 绑定到当前节点的线程。构建时初始化，使用后设置为null
+- Node nextWaiter： 指向在condition上等待的节点，或一个特定的SHARED值。 只有在独占模式下才可能会有条件队列。 
+
 
 Node 中的状态waitStatus的取值：
 - SIGNAL ： 本节点的后续节点是被阻塞的，当前节点释放资源或者取消时，必须唤醒后续节点。 其实就是标识一个节点是否为活跃状态。为了避免并发问题，获取方法必须要先设置 SIGNAL。然后再重试原子性的获取，再次获取失败后才进入阻塞。
@@ -36,6 +96,9 @@ Node 中的状态waitStatus的取值：
 - CONDITION ： 此节点当前在条件队列中。 当在其所等待的condtion 上调用了single()方法后， 节点从条件队列移到同步队列中去，参与资源的获取
 - PROPAGATE ： 在共享模式中标识节点处于可运行状态。
 - 0 : 初始化状态。
+
+头节点永远不会是取消节点的，因为只有获取资源成功的节点才能成为一个头节点。 取消的线程不可能成功获取到资源， 且线程只能取消自己所在的节点，不能取消其它节点。
+
 
 Node 定义了两种模式
 - SHARD 共享模式： state 代码的资源可以同时被多个线程使用。
@@ -116,11 +179,27 @@ Node 定义了两种模式
     }
 ```
 
-# 代码详解
+
+![AQS结构示意图](http://pr31ptshd.bkt.clouddn.com/image/java_basic/AQS_structure.JPG)
+
+# AQS代码框架详解
+
 下面以 acquire，release, acquireShared, releaseShared 的顺序来详细看一下实现的源码。 主要在代码中进行注释的方式来说明。
 
 
-## acquire
+## 独占模式
+
+
+
+
+
+### acquire
+acquire方法流程图
+![acquire流程图](http://pr31ptshd.bkt.clouddn.com/image/java_basic/aqs-exclusive-accquire-flow.png)
+
+acquireQueued方法流程图
+![acquireQueued流程图](http://pr31ptshd.bkt.clouddn.com/image/java_basic/aqs-exclusive-acquireQueued-flow.png)
+
 
 ```java
     public final void acquire(int arg) {
@@ -254,7 +333,7 @@ Node 定义了两种模式
             /*
              * 前节点的 waitStatus 是 0 或 PROPAGATE， 
              * 需要将前节点的 waitStatus 设为 SIGNAL（前一节点释放资源后给本节点发送信号）
-             * 此时本节点不能直接进行waiting 状态，需要调用者应该再尝试一次获取资源
+             * 此时本节点不能直接进入waiting 状态，需要调用者应该再尝试一次获取资源
              * 如果再次失败通过  if (ws == Node.SIGNAL) 分支进入休眠
              */
             compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
@@ -314,25 +393,22 @@ Node 定义了两种模式
     }
 
     /**
-     * Wakes up node's successor, if one exists.
+     * 唤醒后续节点（如果有的话）
      *
      * @param node the node
      */
     private void unparkSuccessor(Node node) {
         /*
-         * If status is negative (i.e., possibly needing signal) try
-         * to clear in anticipation of signalling.  It is OK if this
-         * fails or if status is changed by waiting thread.
+         * 如果状态是负数（需要通知），尝试把通知状态给清除掉。 失败也没有关系~
          */
         int ws = node.waitStatus;
         if (ws < 0)
             compareAndSetWaitStatus(node, ws, 0);
 
         /*
-         * Thread to unpark is held in successor, which is normally
-         * just the next node.  But if cancelled or apparently null,
-         * traverse backwards from tail to find the actual
-         * non-cancelled successor.
+         * 一般来说需要唤醒的下一个线程是next节点。
+         * 如果下一个节点是取消节点或者是null， 
+         * 就需要从tail 开始向前找到第一个未取消节点作为下一个唤醒的线程。
          */
         Node s = node.next;
         if (s == null || s.waitStatus > 0) {
@@ -347,15 +423,16 @@ Node 定义了两种模式
 ```
 
 
-## release(int)
+### release(int)
 独占模式的资源释放方法
+
+![流程图](http://pr31ptshd.bkt.clouddn.com/image/java_basic/aqs-exclusive-release-flow.png)
 
 ```java
     public final boolean release(int arg) {
         // 尝试释放资源， 子类自定义实现
         if (tryRelease(arg)) {
         // 若当前节点已经将资源全部释放，
-            // 将当前头节点移出队列，
             Node h = head;
             if (h != null && h.waitStatus != 0)
                 // 尝试唤醒头节点后续的可唤醒节点（线程）
@@ -376,57 +453,24 @@ Node 定义了两种模式
 ```
 
 
-## acquireShared(int)
+
+
+## 共享模式
+
+### acquireShared(int)
 共享模式的资源获取方法
 
 
 ```java
     public final void acquireShared(int arg) {
+        // 先尝试直接获取所需资源
         if (tryAcquireShared(arg) < 0)
+            // 如果不能直接获取到资源，排队获取
             doAcquireShared(arg);
     }
 
-    /**
-     * Attempts to acquire in shared mode. This method should query if
-     * the state of the object permits it to be acquired in the shared
-     * mode, and if so to acquire it.
-     *
-     * <p>This method is always invoked by the thread performing
-     * acquire.  If this method reports failure, the acquire method
-     * may queue the thread, if it is not already queued, until it is
-     * signalled by a release from some other thread.
-     *
-     * <p>The default implementation throws {@link
-     * UnsupportedOperationException}.
-     *
-     * @param arg the acquire argument. This value is always the one
-     *        passed to an acquire method, or is the value saved on entry
-     *        to a condition wait.  The value is otherwise uninterpreted
-     *        and can represent anything you like.
-     * @return a negative value on failure; zero if acquisition in shared
-     *         mode succeeded but no subsequent shared-mode acquire can
-     *         succeed; and a positive value if acquisition in shared
-     *         mode succeeded and subsequent shared-mode acquires might
-     *         also succeed, in which case a subsequent waiting thread
-     *         must check availability. (Support for three different
-     *         return values enables this method to be used in contexts
-     *         where acquires only sometimes act exclusively.)  Upon
-     *         success, this object has been acquired.
-     * @throws IllegalMonitorStateException if acquiring would place this
-     *         synchronizer in an illegal state. This exception must be
-     *         thrown in a consistent fashion for synchronization to work
-     *         correctly.
-     * @throws UnsupportedOperationException if shared mode is not supported
-     */
-    protected int tryAcquireShared(int arg) {
-        throw new UnsupportedOperationException();
-    }
-
-    /**
-     * Acquires in shared uninterruptible mode.
-     * @param arg the acquire argument
-     */
     private void doAcquireShared(int arg) {
+        // 加入等待队列
         final Node node = addWaiter(Node.SHARED);
         boolean failed = true;
         try {
@@ -444,8 +488,8 @@ Node 定义了两种模式
                         return;
                     }
                 }
-                if (shouldParkAfterFailedAcquire(p, node) &&
-                    parkAndCheckInterrupt())
+                if (shouldParkAfterFailedAcquire(p, node) && // 判断是否可以直接进入休眠
+                    parkAndCheckInterrupt()) // 挂起线程并在唤醒时检查中断标志
                     interrupted = true;
             }
         } finally {
@@ -455,19 +499,11 @@ Node 定义了两种模式
     }
 
 
-    /**
-     * Sets head of queue, and checks if successor may be waiting
-     * in shared mode, if so propagating if either propagate > 0 or
-     * PROPAGATE status was set.
-     *
-     * @param node the node
-     * @param propagate the return value from a tryAcquireShared
-     */
     private void setHeadAndPropagate(Node node, int propagate) {
         Node h = head; // Record old head for check below
         // 将 node 设置为 head
         setHead(node);
-        // 如果资源还有余量，唤醒下一个线程
+        // 如果资源还有余量，唤醒下一个线程来获取资源
         if (propagate > 0 || h == null || h.waitStatus < 0 ||
             (h = head) == null || h.waitStatus < 0) {
             Node s = node.next;
@@ -477,12 +513,6 @@ Node 定义了两种模式
     }
 
 
-
-    /**
-     * Release action for shared mode -- signals successor and ensures
-     * propagation. (Note: For exclusive mode, release just amounts
-     * to calling unparkSuccessor of head if it needs signal.)
-     */
     private void doReleaseShared() {
         for (;;) {
             Node h = head;
@@ -504,19 +534,12 @@ Node 定义了两种模式
     }
 ```
 
-## releaseShared(int)
+
+
+### releaseShared(int)
 
 ```java
 
-    /**
-     * Releases in shared mode.  Implemented by unblocking one or more
-     * threads if {@link #tryReleaseShared} returns true.
-     *
-     * @param arg the release argument.  This value is conveyed to
-     *        {@link #tryReleaseShared} but is otherwise uninterpreted
-     *        and can represent anything you like.
-     * @return the value returned from {@link #tryReleaseShared}
-     */
     public final boolean releaseShared(int arg) {
         // 如果tryReleaseShared返回true, 则解除后面一个或若干线程的阻塞状态
         if (tryReleaseShared(arg)) {
@@ -526,29 +549,15 @@ Node 定义了两种模式
         return false;
     }
 
-    /**
-     * Attempts to set the state to reflect a release in shared mode.
-     *
-     * <p>This method is always invoked by the thread performing release.
-     *
-     * <p>The default implementation throws
-     * {@link UnsupportedOperationException}.
-     *
-     * @param arg the release argument. This value is always the one
-     *        passed to a release method, or the current state value upon
-     *        entry to a condition wait.  The value is otherwise
-     *        uninterpreted and can represent anything you like.
-     * @return {@code true} if this release of shared mode may permit a
-     *         waiting acquire (shared or exclusive) to succeed; and
-     *         {@code false} otherwise
-     * @throws IllegalMonitorStateException if releasing would place this
-     *         synchronizer in an illegal state. This exception must be
-     *         thrown in a consistent fashion for synchronization to work
-     *         correctly.
-     * @throws UnsupportedOperationException if shared mode is not supported
-     */
     protected boolean tryReleaseShared(int arg) {
         throw new UnsupportedOperationException();
     }
 
 ```
+
+
+
+## 子类的实现
+
+### 各方法实现时的注意点
+### 实现示例
