@@ -1,0 +1,19 @@
+@startuml
+[*] --> RUNNING
+
+RUNNING --> SHUTDOWN:shutdown()
+RUNNING --> STOP:shutdownNow()
+SHUTDOWN --> STOP:shutdownNow()
+SHUTDOWN --> TIDYING: both queue and pool are empty
+STOP --> TIDYING: pool is empty
+TIDYING --> TERMINATED: terminated() hook method has completed
+
+
+RUNNING:接收并处理队列中的任务
+SHUTDOWN:不再接收新任务，但会继续处理队列中的任务
+STOP:不再接收新任务，也不再处理队列中的任务，并中断处理中的任务
+TIDYING:所有的任务都已经终止，workerCount 为0， \n过渡到 TIDYING状态的线程会调用钩子方法 terminated()
+TERMINATED:terminated()已经完成
+
+}
+@enduml
