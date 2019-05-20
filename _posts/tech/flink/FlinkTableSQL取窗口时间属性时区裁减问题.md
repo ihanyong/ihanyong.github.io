@@ -33,5 +33,3 @@ http://mail-archives.apache.org/mod_mbox/flink-user/201711.mbox/%3C351FD9AB-7A28
 
 
 
-test_resource
-TESTresource#111
