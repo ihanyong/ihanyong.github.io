@@ -1,0 +1,19 @@
+@startuml
+start
+if (workerCount < corePoolSize) then (yes)
+    if(addWorker) then(success)
+        stop
+    endif
+endif
+
+if (isRunning && workQueue.offer) then (yes)
+    if(!isRunning && remove) then(yes)
+        :reject;
+    elseif(workerCount == 0) then (yes)
+        :addWorker;
+    endif
+elseif (!addWorker) then (yes)
+    :reject;
+endif
+stop
+@enduml
