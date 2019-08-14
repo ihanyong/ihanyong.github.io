@@ -50,3 +50,15 @@ Zookeeper Stat Structure
 ## Bindings
 ## Program Structure
 ## Gotchas: Common Problems and Troubeshooting
+
+
+### 原理
+https://www.cnblogs.com/buyuling/p/7265943.html
+
+https://www.cnblogs.com/stateis0/p/9062133.html
+
+
+ZAB 协议
+Raft 协议
+
+https://www.cnblogs.com/stateis0/p/9062123.html
